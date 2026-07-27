@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Recetas - Cárnicos M&C</title>
+  <link rel="stylesheet" href="css/recetas.css">
+  <style>
+    /* Barra superior con navegación */
+    .top-nav { display:flex; gap:10px; justify-content:center; margin-bottom:6px; }
+    .top-nav a { color:#fff; text-decoration:none; font-size:14px; background:rgba(255,255,255,.18);
+      padding:6px 12px; border-radius:6px; }
+    /* Popup (modal) */
+    .modal-fondo { position:fixed; inset:0; background:rgba(0,0,0,.45); display:none;
+      align-items:center; justify-content:center; padding:16px; z-index:50; }
+    .modal-fondo.abierto { display:flex; }
+    .modal-caja { background:#fff; border-radius:14px; padding:22px; width:100%; max-width:620px;
+      max-height:90vh; overflow:auto; box-shadow:0 10px 30px rgba(0,0,0,.3); text-align:left; }
+    .modal-caja h2 { color:#1976D2; margin:0 0 14px; }
+    /* Cabecera del popup: nombre IZQ, peso+unidad DER */
+    .rec-cab { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:12px; }
+    .rec-campo label { display:block; font-size:13px; font-weight:bold; margin-bottom:5px; color:#333; }
+    .rec-campo input, .rec-campo select { width:100%; padding:10px; border:1px solid #ccc;
+      border-radius:8px; font-size:15px; }
+    .rec-peso { display:flex; gap:8px; }
+    .rec-peso input { flex:1; }
+    .rec-peso select { width:90px; }
+    /* Tabla de componentes */
+    table.comp { width:100%; border-collapse:collapse; margin-top:6px; }
+    table.comp th { font-size:12px; color:#555; text-align:left; padding:6px 6px; }
+    table.comp td { padding:4px 6px; }
+    table.comp select, table.comp input { width:100%; padding:8px; border:1px solid #ccc; border-radius:7px; }
+    .btn-x { background:#ef5350; color:#fff; border:none; border-radius:6px; width:32px; height:34px; cursor:pointer; }
+    .btn-add { background:#64b5f6; color:#fff; border:none; padding:9px 14px; border-radius:8px; cursor:pointer; margin-top:10px; }
+    .modal-acc { display:flex; gap:10px; margin-top:16px; }
+    .modal-acc button { flex:1; padding:12px; border:none; border-radius:8px; cursor:pointer; font-size:15px; }
+    .b-cancelar { background:#e0e0e0; color:#333; }
+    .b-guardar { background:#2196F3; color:#fff; }
+    .rec-err { color:#d32f2f; background:#ffebee; border:1px solid #ffcdd2; border-radius:6px;
+      padding:8px; margin-top:10px; font-size:14px; display:none; }
+    .rec-sub { color:#555; font-size:13px; margin:2px 0 0; }
+    /* Tarjeta de receta en la lista */
+    .rec-item-cab { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; width:100%; }
+    .rec-item-cab .acc button { margin-left:6px; }
+    .rec-chips { margin-top:6px; font-size:13px; color:#333; }
+    .rec-chip { display:inline-block; background:#e3f2fd; border-radius:12px; padding:2px 10px; margin:3px 3px 0 0; }
+  </style>
+</head>
+
+<body class="recetas-body">
+  <header>
+    <img src="img/logo.png" alt="Cárnicos M&C" class="logo-recetas">
+    <h1>Gestión de Recetas</h1>
+    <div class="top-nav">
+      <a href="admin.html">← Panel</a>
+      <a href="calculos.html">Calcular / Producir</a>
+      <a href="#" onclick="logout();return false;">Salir</a>
+    </div>
+  </header>
+
+  <main class="recetas-container">
+    <button id="btnAgregarReceta">Agregar Receta</button>
+    <button id="btnListaRecetas">Lista de Recetas</button>
+
+    <!-- Lista de recetas guardadas -->
+    <div id="listaRecetas">
+      <h2>Recetas Guardadas</h2>
+      <ul id="recetasList"></ul>
+    </div>
+  </main>
+
+  <!-- POPUP: nueva / editar receta -->
+  <div class="modal-fondo" id="modalReceta">
+    <div class="modal-caja">
+      <h2 id="modalTitulo">Nueva Receta</h2>
+      <div class="rec-cab">
+        <div class="rec-campo">
+          <label>Nombre de la receta</label>
+          <input type="text" id="nombreReceta" placeholder="Ej. Jamón tradicional">
+        </div>
+        <div class="rec-campo">
+          <label>Rinde (peso del producto final)</label>
+          <div class="rec-peso">
+            <input type="number" id="rindeCantidad" placeholder="Ej. 100" inputmode="decimal">
+            <select id="rindeUnidad">
+              <option value="lb">lb</option>
+              <option value="g">g</option>
+              <option value="kg">kg</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <p class="rec-sub" style="margin-bottom:12px;">El producto terminado será esta misma receta (<b id="nombreEco">…</b>). Se crea/actualiza solo en el Almacén.</p>
+
+      <label style="font-weight:bold;font-size:13px;color:#333;">Componentes (del almacén)</label>
+      <p class="rec-sub">Qué lleva y cuánto para el rinde de arriba (azúcar, sal común, sal de nitro, hielo…).</p>
+      <table class="comp">
+        <thead>
+          <tr><th>Producto / componente</th><th style="width:120px;">Cantidad</th><th style="width:40px;"></th></tr>
+        </thead>
+        <tbody id="compBody"></tbody>
+      </table>
+      <button type="button" class="btn-add" id="btnAgregarComp">+ Agregar componente</button>
+
+      <p class="rec-err" id="recError"></p>
+      <div class="modal-acc">
+        <button class="b-cancelar" id="btnCancelar">Cancelar</button>
+        <button class="b-guardar" id="btnGuardar">Guardar Receta</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script src="js/recetas.js"></script>
+</body>
+</html>

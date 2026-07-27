@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Área de Contabilidad - Cárnicos M&C</title>
+  <link rel="stylesheet" href="css/contabilidad.css">
+</head>
+
+<body class="contabilidad-body">
+  <header>
+    <img src="img/logo.png" alt="Logo Empresa" class="logo-contabilidad">
+    <h1>Área de Contabilidad - Cárnicos M&C</h1>
+  </header>
+
+  <main class="contabilidad-container">
+    <!-- Vista de datos sin edición -->
+    <h2>Resumen del Mes (<span id="mesActual"></span>)</h2>
+    <div class="resumen" id="resumenGanancia">
+      <p>Cargando...</p>
+    </div>
+
+    <!-- Tablas de datos -->
+    <section>
+      <h2>Detalle de Gastos</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Categoría</th>
+            <th>Concepto</th>
+            <th>Monto</th>
+            <th>Moneda</th>
+            <th>Fecha</th>
+          </tr>
+        </thead>
+        <tbody id="tablaGastos">
+          <!-- Datos cargados dinámicamente -->
+        </tbody>
+      </table>
+    </section>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/contabilidad.js"></script>
+</body>
+</html>

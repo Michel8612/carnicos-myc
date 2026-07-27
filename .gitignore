@@ -1,0 +1,18 @@
+# Dependencias
+node_modules/
+**/node_modules/
+
+# Datos locales (modo SQLite antiguo, no se usa)
+backend/data/
+
+# Secretos
+.env
+.env.*
+!.env.example
+
+# Netlify
+.netlify/
+
+# Logs
+*.log
+npm-debug.log*

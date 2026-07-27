@@ -1,0 +1,139 @@
+/* Estilos generales de la ventana Ventas */
+body.ventas-body {
+  margin: 0;
+  font-family: Arial, Helvetica, sans-serif;
+  background: linear-gradient(to bottom, #f0f8ff, #e0f2f1);
+  color: #000;
+}
+
+/* Header */
+header {
+  text-align: center;
+  padding: 20px;
+  background: #0288d1;
+  color: #fff;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+}
+
+.logo-ventas {
+  width: 100px;
+  display: block;
+  margin: 0 auto 10px auto;
+}
+
+h1, h2 {
+  margin: 10px 0;
+}
+
+/* Contenedor general */
+.ventas-container {
+  padding: 30px;
+  max-width: 900px;
+  margin: auto;
+}
+
+/* Botón principal */
+#btnAgregarVenta {
+  padding: 12px 20px;
+  background: #4fc3f7;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 15px;
+  cursor: pointer;
+  transition: background 0.3s ease, transform 0.2s ease, box-shadow 0.3s ease;
+}
+
+#btnAgregarVenta:hover {
+  background: #29b6f6;
+  transform: scale(1.05);
+  box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+}
+
+/* Formulario de ventas */
+#formVenta {
+  margin-top: 20px;
+  padding: 20px;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+}
+
+#ventaForm input {
+  width: 100%;
+  padding: 12px;
+  margin: 10px 0;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  font-size: 15px;
+}
+
+#ventaForm button {
+  margin-top: 10px;
+  background: #0288d1;
+  color: #fff;
+  border: none;
+  padding: 12px 20px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.3s ease;
+}
+
+#ventaForm button:hover {
+  background: #0277bd;
+}
+
+/* Tabla de ventas */
+#listaVentas {
+  margin-top: 30px;
+}
+
+#listaVentas table {
+  width: 100%;
+  border-collapse: collapse;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+#listaVentas th, #listaVentas td {
+  border: 1px solid #ccc;
+  padding: 12px;
+  text-align: center;
+}
+
+#listaVentas th {
+  background: #b3e5fc;
+  font-weight: bold;
+}
+
+#listaVentas tr:nth-child(even) {
+  background: #e1f5fe;
+}
+
+/* Total de ventas */
+.total-container {
+  margin-top: 20px;
+  padding: 15px;
+  background: #f5f5f5;
+  border-radius: 8px;
+  font-size: 18px;
+  text-align: right;
+  font-weight: bold;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+}
+
+.total-container strong {
+  color: #0288d1;
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+  #ventaForm input {
+    font-size: 14px;
+  }
+
+  #listaVentas th, #listaVentas td {
+    padding: 8px;
+  }
+}

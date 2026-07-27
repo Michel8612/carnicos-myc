@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Panel Admin - Cárnicos M&C</title>
+  <link rel="stylesheet" href="css/admin.css">
+</head>
+
+<body class="admin-body">
+  <header>
+    <img src="img/logo.png" alt="Logo Empresa" class="logo-admin">
+    <h1 id="tituloAdmin">Panel de Administración - Cárnicos M&C</h1>
+  </header>
+
+  <main class="admin-container">
+    <!-- Botones principales -->
+    <button onclick="location.href='usuarios.html'">Agregar/Quitar Usuarios</button>
+    <button onclick="location.href='recetas.html'">Recetas</button>
+    <button onclick="location.href='almacen.html'">Almacén</button>
+    <button onclick="location.href='ventas.html'">Área de Ventas</button>
+    <button onclick="location.href='contabilidad.html'">Área de Contabilidad</button>
+    <button onclick="location.href='calculos.html'">Cálculos de Recetas</button>
+    <button onclick="cambiarCredenciales()">Cambiar Usuario/Contraseña Admin</button>
+    <button onclick="logout()">Cerrar sesión</button>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/admin.js"></script>
+</body>
+</html>

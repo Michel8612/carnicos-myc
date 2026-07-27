@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Almacén - Cárnicos M&C</title>
+  <link rel="stylesheet" href="css/almacen.css">
+</head>
+
+<body class="almacen-body">
+  <header>
+    <img src="img/logo.png" alt="Logo Empresa" class="logo-almacen">
+    <h1>Gestión de Almacén - Cárnicos M&C</h1>
+  </header>
+
+  <main class="almacen-container">
+    <!-- Contadores -->
+    <div id="contadoresAlmacen" class="total-container">
+      <span id="contadorProductos">0 productos</span>
+      &nbsp;·&nbsp;
+      <span id="contadorAlmacenes">0 almacenes</span>
+    </div>
+
+    <!-- Botón para agregar producto -->
+    <button id="btnAgregarProducto">Agregar Producto</button>
+
+    <!-- Formulario para nuevo producto -->
+    <div id="formProducto" class="hidden">
+      <h2>Nuevo Producto</h2>
+      <form id="productoForm">
+        <input type="text" id="nombreProducto" placeholder="Nombre del Producto" required>
+
+        <select id="tipoProducto" required>
+          <option value="materia_prima">Materia prima</option>
+          <option value="terminado">Terminado</option>
+          <option value="reventa">Reventa</option>
+        </select>
+
+        <select id="unidadProducto" required>
+          <!-- Se llena dinámicamente desde API.unidades() -->
+        </select>
+
+        <input type="number" step="0.01" id="precioCosto" placeholder="Precio de Costo" required>
+        <input type="number" step="0.01" id="precioVenta" placeholder="Precio de Venta (opcional)">
+        <input type="number" step="0.01" id="stockMinimo" placeholder="Stock Mínimo (opcional)">
+        <button type="submit">Guardar Producto</button>
+      </form>
+    </div>
+
+    <!-- Formulario de entrada/salida de stock -->
+    <div id="formMovimiento">
+      <h2>Registrar Entrada / Salida</h2>
+      <form id="movimientoForm">
+        <select id="movProducto" required>
+          <!-- Se llena dinámicamente desde API.productos() -->
+        </select>
+
+        <select id="movAlmacen" required>
+          <!-- Se llena dinámicamente desde API.almacenes() -->
+        </select>
+
+        <select id="movTipo" required>
+          <option value="entrada">Entrada</option>
+          <option value="salida">Salida</option>
+        </select>
+
+        <input type="number" step="0.01" id="movCantidad" placeholder="Cantidad" required>
+        <input type="text" id="movNota" placeholder="Nota (opcional)">
+        <button type="submit">Registrar Movimiento</button>
+      </form>
+    </div>
+
+    <!-- Lista de productos en almacén -->
+    <div id="listaAlmacen">
+      <h2>Productos en Almacén</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Producto</th>
+            <th>Tipo</th>
+            <th>Unidad</th>
+            <th>Cantidad</th>
+            <th>Costo</th>
+            <th>Acción</th>
+          </tr>
+        </thead>
+        <tbody id="almacenList">
+          <!-- Aquí se cargan los productos dinámicamente -->
+        </tbody>
+      </table>
+    </div>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/almacen.js"></script>
+</body>
+</html>

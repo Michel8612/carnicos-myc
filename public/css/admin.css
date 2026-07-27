@@ -1,0 +1,72 @@
+/* Estilos generales del panel Admin */
+body.admin-body {
+  margin: 0;
+  font-family: Arial, Helvetica, sans-serif;
+  background: linear-gradient(to bottom, #f0fff0, #d9f9d9);
+  color: #000;
+}
+
+/* Header */
+header {
+  text-align: center;
+  padding: 20px;
+  background: #4CAF50;
+  color: #fff;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+}
+
+.logo-admin {
+  width: 100px;
+  display: block;
+  margin: 0 auto 10px auto;
+}
+
+h1 {
+  margin: 0;
+  font-size: 24px;
+}
+
+/* Contenedor principal */
+.admin-container {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  padding: 30px;
+  gap: 20px;
+  max-width: 900px;
+  margin: auto;
+}
+
+/* Botones principales */
+.admin-container button {
+  padding: 20px 30px;
+  background: #66bb6a;
+  color: #fff;
+  border: none;
+  border-radius: 50px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background 0.3s ease, transform 0.2s ease, box-shadow 0.3s ease;
+  min-width: 180px;
+  text-align: center;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+}
+
+.admin-container button:hover {
+  background: #57a05c;
+  transform: scale(1.05);
+  box-shadow: 0 6px 14px rgba(0,0,0,0.15);
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+  h1 {
+    font-size: 20px;
+  }
+
+  .admin-container button {
+    padding: 15px 20px;
+    font-size: 14px;
+    min-width: 140px;
+  }
+}

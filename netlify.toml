@@ -1,0 +1,30 @@
+# ============================================================
+#  Netlify — Cárnicos M&C
+#
+#  - Frontend estático (public/) servido por Netlify.
+#  - Backend Express como UNA función serverless (netlify/functions/api.js).
+#  - /api/* -> la función.  DB: Neon (Postgres).
+#
+#  Variables (Site settings -> Environment variables):
+#     DATABASE_URL, JWT_SECRETO
+# ============================================================
+
+[build]
+  # No hay build del frontend (páginas estáticas). Solo se publica public/.
+  command = "echo sin-build"
+  publish = "public"
+  functions = "netlify/functions"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+[functions]
+  node_bundler = "esbuild"
+  external_node_modules = ["pg", "pg-native"]
+
+# La API -> función serverless
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+  force = true

@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gestión de Usuarios - Cárnicos M&C</title>
+  <link rel="stylesheet" href="css/usuarios.css">
+</head>
+
+<body class="usuarios-body">
+  <header>
+    <img src="img/logo.png" alt="Logo Empresa" class="logo-usuarios">
+    <h1>Gestión de Usuarios - Cárnicos M&C</h1>
+  </header>
+
+  <main class="usuarios-container">
+    <!-- Botón para agregar usuario -->
+    <button id="btnAgregarUsuario">Agregar Usuario</button>
+
+    <!-- Formulario para nuevo usuario -->
+    <div id="formUsuario" class="hidden">
+      <h2>Nuevo Usuario</h2>
+      <form id="usuarioForm">
+        <input type="text" id="nombreUsuario" placeholder="Nombre del Usuario" required>
+        <input type="text" id="loginUsuario" placeholder="Usuario (para iniciar sesión)" required>
+        <input type="password" id="claveUsuario" placeholder="Clave temporal (mínimo 6 caracteres)" required>
+
+        <label for="rolUsuario">Rol:</label>
+        <select id="rolUsuario">
+          <option value="cocinero">Cocinero (recetas y producción)</option>
+          <option value="almacen">Almacén</option>
+          <option value="ventas">Ventas</option>
+          <option value="contabilidad">Contabilidad (solo ver)</option>
+          <option value="dueno">Dueño (acceso total)</option>
+        </select>
+
+        <label for="almacenUsuario">Almacén (opcional):</label>
+        <select id="almacenUsuario">
+          <option value="">-- Sin asignar --</option>
+        </select>
+
+        <button type="submit">Guardar Usuario</button>
+      </form>
+    </div>
+
+    <!-- Lista de usuarios -->
+    <div id="listaUsuarios">
+      <h2>Usuarios Registrados</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Nombre</th>
+            <th>Usuario</th>
+            <th>Rol</th>
+            <th>Estado</th>
+            <th>Acción</th>
+          </tr>
+        </thead>
+        <tbody id="usuariosList">
+          <!-- Aquí se cargan los usuarios dinámicamente -->
+        </tbody>
+      </table>
+    </div>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/usuarios.js"></script>
+</body>
+</html>

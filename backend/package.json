@@ -1,0 +1,25 @@
+{
+  "name": "sistema-alimentos-backend",
+  "version": "0.1.0",
+  "description": "Backend del sistema de gestión para centro de elaboración de alimentos",
+  "type": "module",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "seed": "node src/db/seed.js",
+    "limpiar": "node src/db/limpiar.js",
+    "clave": "node src/licencia/generar-clave.js",
+    "clave-proveedor": "node src/licencia/clave-proveedor.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "express-async-errors": "^3.1.1",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.13.1",
+    "serverless-http": "^3.2.0"
+  }
+}

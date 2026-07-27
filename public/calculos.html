@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cálculos de Recetas - Cárnicos M&C</title>
+  <link rel="stylesheet" href="css/calculos.css">
+  <style>
+    .top-nav { display:flex; gap:10px; justify-content:center; margin-bottom:6px; }
+    .top-nav a { color:#fff; text-decoration:none; font-size:14px; background:rgba(255,255,255,.18); padding:6px 12px; border-radius:6px; }
+    .fila-cfg { display:flex; flex-wrap:wrap; gap:14px; justify-content:center; align-items:flex-end; margin:14px 0; }
+    .cfg-campo { text-align:left; }
+    .cfg-campo label { display:block; font-size:13px; font-weight:bold; color:#333; margin-bottom:4px; }
+    .cfg-campo select, .cfg-campo input { padding:10px; border:1px solid #ccc; border-radius:8px; font-size:15px; }
+    .cfg-campo .conunidad { display:flex; align-items:center; gap:6px; }
+    .cfg-campo .conunidad span { font-weight:bold; color:#1976D2; }
+    tr.falta td { color:#d32f2f; font-weight:bold; }
+    .aviso { margin-top:12px; padding:10px; border-radius:8px; font-size:14px; }
+    .aviso.rojo { background:#ffebee; color:#c62828; border:1px solid #ffcdd2; }
+    .aviso.verde { background:#e8f5e9; color:#2e7d32; border:1px solid #c8e6c9; }
+    .acciones-prod { margin-top:16px; text-align:center; }
+    .btn-producir { padding:14px 28px; background:#2e7d32; color:#fff; border:none; border-radius:8px; font-size:16px; cursor:pointer; }
+    .btn-producir:hover { background:#1b5e20; }
+    .costo-unit { font-size:14px; color:#555; text-align:right; margin-top:4px; }
+  </style>
+</head>
+
+<body class="calculos-body">
+  <header>
+    <img src="img/logo.png" alt="Cárnicos M&C" class="logo-calculos">
+    <h1>Cálculos y Producción de Recetas</h1>
+    <div class="top-nav">
+      <a href="admin.html">← Panel</a>
+      <a href="recetas.html">Recetas</a>
+      <a href="#" onclick="logout();return false;">Salir</a>
+    </div>
+  </header>
+
+  <main class="calculos-container">
+    <div class="fila-cfg">
+      <div class="cfg-campo">
+        <label>Receta</label>
+        <select id="selectReceta"><option value="">Elegir receta…</option></select>
+      </div>
+      <div class="cfg-campo">
+        <label id="lblObjetivo">¿Cuántas libras de producto final?</label>
+        <div class="conunidad">
+          <input type="number" id="cantidadProduccion" placeholder="Ej. 100" inputmode="decimal">
+          <span id="unidadObjetivo">lb</span>
+        </div>
+      </div>
+      <div class="cfg-campo">
+        <label>Almacén</label>
+        <select id="selectAlmacen"></select>
+      </div>
+      <div class="cfg-campo">
+        <button id="btnCalcular" style="padding:12px 20px;background:#2196F3;color:#fff;border:none;border-radius:8px;cursor:pointer;">Calcular</button>
+      </div>
+    </div>
+
+    <!-- Resultados -->
+    <div id="resultadoCalculos" class="hidden">
+      <h2>Se consumirá del almacén</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Componente</th>
+            <th>Necesita</th>
+            <th>En almacén</th>
+            <th>Costo</th>
+          </tr>
+        </thead>
+        <tbody id="tablaCalculos"></tbody>
+      </table>
+
+      <div class="total-container">
+        <strong>Costo total de producción:</strong>
+        <span id="costoTotal">0</span>
+      </div>
+      <div class="costo-unit">Costo por <span id="unidadCosto">lb</span>: <b id="costoUnitario">0</b></div>
+
+      <div id="avisoFalta" class="aviso rojo" style="display:none;"></div>
+
+      <div class="acciones-prod">
+        <button class="btn-producir" id="btnProducir">Producir (descontar del almacén)</button>
+      </div>
+      <div id="avisoResultado" class="aviso verde" style="display:none;"></div>
+    </div>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/calculos.js"></script>
+</body>
+</html>
