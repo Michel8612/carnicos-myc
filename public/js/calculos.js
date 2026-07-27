@@ -7,7 +7,10 @@
 //     sobre el rinde base de la receta),
 //   - lo cruza con lo que hay EN EL ALMACÉN (disponible / falta),
 //   - calcula el costo total y por unidad,
-//   - y permite PRODUCIR: ahora solo simula, NO descuenta inventario.
+//   - y permite REGISTRAR LA PRODUCCIÓN: queda en el historial de
+//     cocina (qué se produjo, qué consumió y cuánto costó) pero NO
+//     descuenta del almacén: la cocina y el almacén llevan
+//     contabilidades separadas.
 // ============================================================
 
 // Solo el Cocinero (o el Dueño) calcula y produce.
@@ -101,7 +104,7 @@ async function calcular() {
 
   let avisos = [];
   if (previa.hay_faltantes) {
-    avisos.push('No hay suficiente de algún componente en este almacén. Puede simular igual (el stock quedará en negativo en la simulación) y regularizar después.');
+    avisos.push('Según el almacén, no alcanza algún componente. Es solo informativo: registrar la producción no modifica el almacén.');
   }
   if (previa.hay_sin_costo) {
     avisos.push('Aviso: algún componente no tiene precio de costo, así que el costo mostrado es menor al real.');
@@ -111,53 +114,38 @@ async function calcular() {
 
   cajaResultado.classList.remove('hidden');
 }
-// ============================================================
-//  Producción simulada — no altera inventario
-// ============================================================
 
 async function producir() {
   const r = recetaActual();
-  const factor = factorActual();
   const almacenId = selAlmacen.value;
-
-  if (!r || !almacenId || !factor) { 
-    alert('Complete receta, cantidad y almacén.'); 
-    return; 
-  }
+  const factor = factorActual();
+  if (!r || !almacenId || !factor) { alert('Complete receta, cantidad y almacén.'); return; }
 
   const u = unidadDeReceta();
+  const cantidad = Number(inpCantidad.value);
+  if (!confirm(`¿Registrar la producción de ${fmt(cantidad)} ${u} de ${r.nombre}?\n\nQueda en el historial de cocina con su costo. El almacén NO se modifica.`)) return;
+
   const btn = document.getElementById('btnProducir');
-  btn.disabled = true; 
-  btn.textContent = 'Simulando…';
-
+  btn.disabled = true; btn.textContent = 'Registrando…';
   try {
-    // Simulación de producción: solo muestra resultados
+    // Se manda la cantidad final (lb/kg) que pidió el usuario; el servidor
+    // la traduce al rinde de la receta.
+    const res = await API.recetaProducir(r.id, { cantidad_final: cantidad, almacen_id: Number(almacenId) });
     avisoResultado.style.display = 'block';
-    avisoResultado.textContent = `⚠ Simulación: producir ${fmt(Number(inpCantidad.value))} ${u} de ${r.producto_nombre}.
-    El costo total estimado sería ${money(factor * (r.costo_base || 0))}.
-    El almacén no se modificó.`;
-
-    // Opcional: refrescar cálculos para ver insumos y costos
-    await calcular();
+    let msg = `✓ Registrado: ${fmt(res.cantidad_producida)} ${u} de ${r.nombre}. Costo total ${money(res.costo_total)} (${money(res.costo_unitario)} por ${u}). Queda en el historial de cocina; el almacén no se modificó.`;
+    if (res.avisos && res.avisos.length) msg += ' ⚠ ' + res.avisos.join(' · ');
+    avisoResultado.textContent = msg;
+    await calcular(); // refrescar disponibilidades
   } catch (e) {
     alert(e.message);
   } finally {
-    btn.disabled = false; 
-    btn.textContent = 'Simular producción';
+    btn.disabled = false; btn.textContent = 'Registrar producción';
   }
 }
 
-// ============================================================
-//  Eventos de interfaz
-// ============================================================
-
-selReceta.addEventListener('change', () => { 
-  actualizarUnidad(); 
-  cajaResultado.classList.add('hidden'); 
-});
-
+// Eventos
+selReceta.addEventListener('change', () => { actualizarUnidad(); cajaResultado.classList.add('hidden'); });
 document.getElementById('btnCalcular').addEventListener('click', calcular);
 document.getElementById('btnProducir').addEventListener('click', producir);
 
-// Inicialización
 cargar();

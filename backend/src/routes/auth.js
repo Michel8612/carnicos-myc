@@ -39,7 +39,7 @@ router.post('/login', async (req, res) => {
   const token = crearToken(fila);
   res.json({
     token,
-    usuario: { id: fila.id, nombre: fila.nombre, usuario: fila.usuario, rol: fila.rol, debe_cambiar: fila.debe_cambiar },
+    usuario: { id: fila.id, nombre: fila.nombre, usuario: fila.usuario, rol: fila.rol, almacen_id: fila.almacen_id, debe_cambiar: fila.debe_cambiar },
   });
 });
 

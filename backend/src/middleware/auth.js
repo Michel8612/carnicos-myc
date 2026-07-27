@@ -8,6 +8,7 @@
 // ============================================================
 
 import jwt from 'jsonwebtoken';
+import db from '../db/index.js';
 
 // Clave secreta para firmar los tokens. En producción (el VPS)
 // se pone una clave larga y única en una variable de entorno.
@@ -22,17 +23,31 @@ export function crearToken(usuario) {
 }
 
 // Verifica que quien hace una acción tenga un token válido.
-export function requiereSesion(req, res, next) {
+export async function requiereSesion(req, res, next) {
   const cabecera = req.headers.authorization;
   if (!cabecera || !cabecera.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'Debe iniciar sesión.' });
   }
+  let datos;
   try {
-    req.usuario = jwt.verify(cabecera.slice(7), SECRETO);
-    next();
+    datos = jwt.verify(cabecera.slice(7), SECRETO);
   } catch {
     return res.status(401).json({ error: 'Su sesión expiró. Vuelva a entrar.' });
   }
+  // El token puede ser de un usuario que ya no existe o fue desactivado
+  // (p. ej. tras reinstalar la base). Se comprueba contra la base para no
+  // dejar pasar sesiones huérfanas: darían errores raros al guardar.
+  try {
+    const u = await db.prepare('SELECT id, rol, almacen_id, activo FROM usuarios WHERE id = ?').get(datos.id);
+    if (!u || !u.activo) {
+      return res.status(401).json({ error: 'Su sesión ya no es válida. Vuelva a entrar.' });
+    }
+    // Se usan los datos frescos (rol/almacén pueden haber cambiado).
+    req.usuario = { ...datos, rol: u.rol, almacen_id: u.almacen_id };
+  } catch (e) {
+    return res.status(500).json({ error: 'No se pudo verificar la sesión.' });
+  }
+  next();
 }
 
 // Restringe una acción al dueño o al proveedor (soporte).

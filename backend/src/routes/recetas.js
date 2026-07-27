@@ -121,15 +121,30 @@ router.delete('/:id', async (req, res) => {
 });
 
 // ---------- VISTA PREVIA de producción ----------
-// Dado una receta y un factor, muestra qué se va a consumir y si
-// alcanza el inventario, SIN producir todavía.
+// Traduce lo que pide el usuario a un "factor" (veces la receta base).
+// Acepta cantidad_final (libras/kg de producto terminado que quiere) o
+// factor directo. Si no viene nada, es una vez la receta.
+function factorDesde(fuente, receta) {
+  const cantidadFinal = Number(fuente.cantidad_final);
+  if (cantidadFinal > 0 && receta.rinde_cantidad > 0) {
+    return cantidadFinal / receta.rinde_cantidad;
+  }
+  return Number(fuente.factor) || 1;
+}
+
+// Dado una receta y cuánto se quiere producir, muestra qué se va a
+// consumir y si alcanza el inventario, SIN producir todavía.
 router.get('/:id/previa', async (req, res) => {
   const id = Number(req.params.id);
-  const factor = Number(req.query.factor) || 1;
   const almacenId = req.query.almacen_id ? Number(req.query.almacen_id) : null;
 
   const receta = await db.prepare('SELECT * FROM recetas WHERE id = ?').get(id);
   if (!receta) return res.status(404).json({ error: 'Receta no encontrada.' });
+
+  // Se puede pedir por CANTIDAD FINAL (ej. "quiero 50 lb de jamón") o por
+  // factor (veces la receta base). La cantidad final es lo natural para el
+  // usuario; aquí se traduce a factor sobre el rinde de la receta.
+  const factor = factorDesde(req.query, receta);
 
   const ingredientes = await db.prepare(`
     SELECT ri.*, p.nombre AS producto_nombre, p.precio_costo, u.abreviatura AS unidad
@@ -177,18 +192,22 @@ router.get('/:id/previa', async (req, res) => {
   });
 });
 
-// ---------- PRODUCIR ----------
-// Ejecuta la producción: descuenta ingredientes, suma terminado,
-// calcula costo, registra. Avisa faltantes pero PERMITE (negativo).
+// ---------- REGISTRAR PRODUCCIÓN (cocina) ----------
+// La cocina y el almacén llevan contabilidades SEPARADAS: aquí se
+// registra qué se produjo, qué consumió y cuánto costó (queda en el
+// historial de cocina y en los reportes), pero NO se tocan las
+// existencias del almacén. El almacenero descarga su inventario aparte.
 router.post('/:id/producir', async (req, res) => {
   const id = Number(req.params.id);
-  const factor = Number(req.body.factor) || 1;
   const almacenId = req.body.almacen_id ? Number(req.body.almacen_id) : null;
   const nota = req.body.nota || null;
 
   const receta = await db.prepare('SELECT * FROM recetas WHERE id = ?').get(id);
   if (!receta) return res.status(404).json({ error: 'Receta no encontrada.' });
   if (!almacenId) return res.status(400).json({ error: 'Indique el almacén de producción.' });
+
+  // Cuánto se va a producir: por cantidad final (lb/kg) o por factor.
+  const factor = factorDesde(req.body, receta);
 
   const ingredientes = await db.prepare(`
     SELECT ri.*, p.nombre AS producto_nombre, p.precio_costo
@@ -206,48 +225,23 @@ router.post('/:id/producir', async (req, res) => {
   const tx = db.transaction(async () => {
     let costoTotal = 0;
 
-    // 1) Descontar cada ingrediente
+    // 1) Calcular el consumo y su costo. Se AVISA si el almacén no tiene
+    //    suficiente, pero NO se descuenta nada: el almacén es otra
+    //    contabilidad y se descarga por su propia sección.
     for (const ing of ingredientes) {
       const necesita = Number((ing.cantidad * factor).toFixed(3));
       const costoUnit = ing.precio_costo || 0;
-      const costo = Number((necesita * costoUnit).toFixed(2));
-      costoTotal += costo;
+      costoTotal += Number((necesita * costoUnit).toFixed(2));
 
-      // existencia en ese almacén (crea la fila si no existe)
-      let ex = await db.prepare('SELECT id, cantidad FROM existencias WHERE producto_id=? AND almacen_id=?')
+      const ex = await db.prepare('SELECT cantidad FROM existencias WHERE producto_id=? AND almacen_id=?')
         .get(ing.producto_id, almacenId);
-      if (!ex) {
-        const r = await db.prepare('INSERT INTO existencias (producto_id, almacen_id, cantidad) VALUES (?, ?, 0)')
-          .run(ing.producto_id, almacenId);
-        ex = { id: r.lastInsertRowid, cantidad: 0 };
+      const hay = ex ? ex.cantidad : 0;
+      if (hay < necesita) {
+        avisos.push(`${ing.producto_nombre}: en almacén hay ${hay} y hacen falta ${necesita}`);
       }
-      if (ex.cantidad < necesita) {
-        avisos.push(`${ing.producto_nombre}: faltan ${Number((necesita - ex.cantidad).toFixed(3))} (quedó en negativo)`);
-      }
-      // descontar (permite negativo, como pediste)
-      await db.prepare('UPDATE existencias SET cantidad = cantidad - ? WHERE id = ?').run(necesita, ex.id);
-      await db.prepare(`
-        INSERT INTO movimientos (producto_id, almacen_id, tipo, cantidad, origen_tipo, usuario_id, nota)
-        VALUES (?, ?, 'salida', ?, 'produccion', ?, 'Consumo en producción')
-      `).run(ing.producto_id, almacenId, necesita, req.usuario.id);
     }
 
-    // 2) Sumar el producto terminado
-    let exFinal = await db.prepare('SELECT id FROM existencias WHERE producto_id=? AND almacen_id=?')
-      .get(receta.producto_final_id, almacenId);
-    if (!exFinal) {
-      await db.prepare('INSERT INTO existencias (producto_id, almacen_id, cantidad) VALUES (?, ?, ?)')
-        .run(receta.producto_final_id, almacenId, cantidadProducida);
-    } else {
-      await db.prepare('UPDATE existencias SET cantidad = cantidad + ? WHERE id = ?')
-        .run(cantidadProducida, exFinal.id);
-    }
-    await db.prepare(`
-      INSERT INTO movimientos (producto_id, almacen_id, tipo, cantidad, origen_tipo, usuario_id, nota)
-      VALUES (?, ?, 'produccion', ?, 'produccion', ?, 'Producto terminado')
-    `).run(receta.producto_final_id, almacenId, cantidadProducida, req.usuario.id);
-
-    // 3) Registrar la producción
+    // 2) Registrar la producción (historial de cocina)
     const prod = await db.prepare(`
       INSERT INTO producciones
         (receta_id, producto_final_id, cantidad_producida, factor_escala, costo_total, almacen_id, usuario_id, nota)
@@ -255,7 +249,7 @@ router.post('/:id/producir', async (req, res) => {
     `).run(id, receta.producto_final_id, cantidadProducida, factor, Number(costoTotal.toFixed(2)), almacenId, req.usuario.id, nota);
     const prodId = prod.lastInsertRowid;
 
-    // 4) Detalle de consumo
+    // 3) Detalle de consumo (qué llevó y cuánto costó cada componente)
     for (const ing of ingredientes) {
       const necesita = Number((ing.cantidad * factor).toFixed(3));
       const costoUnit = ing.precio_costo || 0;
@@ -265,7 +259,7 @@ router.post('/:id/producir', async (req, res) => {
       `).run(prodId, ing.producto_id, necesita, costoUnit, Number((necesita * costoUnit).toFixed(2)));
     }
 
-    // 5) Actualizar el costo del producto terminado (costo por unidad)
+    // 4) Actualizar el costo por unidad del producto terminado (ficha de costo)
     if (cantidadProducida > 0) {
       const costoUnitFinal = Number((costoTotal / cantidadProducida).toFixed(4));
       await db.prepare('UPDATE productos SET precio_costo = ? WHERE id = ?')
@@ -283,6 +277,8 @@ router.post('/:id/producir', async (req, res) => {
     costo_total: resultado.costoTotal,
     costo_unitario: cantidadProducida > 0 ? Number((resultado.costoTotal / cantidadProducida).toFixed(4)) : 0,
     avisos,
+    // Deja claro para quien consuma la API que el almacén no se movió.
+    afecta_almacen: false,
   });
 });
 
