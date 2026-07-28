@@ -1,16 +1,17 @@
 # ============================================================
-#  Compilar la app de Android (APK) — Cárnicos M&C
+#  App de Android (APK) — Cárnicos M&C
 #
 #  Se compila EN GITHUB dentro de una imagen Docker que ya trae
 #  el SDK de Android, Java y Node instalados. Así no hay que
-#  descargar nada en la PC ni esperar a que GitHub instale el SDK
-#  en cada intento: es más rápido y siempre igual.
-#
-#  Al terminar, el APK (unos 4 MB) queda para descargar en la
-#  pestaña "Actions" del repositorio.
+#  descargar nada en la PC y siempre sale igual.
 #
 #  La app es un contenedor nativo que abre el sistema alojado en
-#  Netlify, así que se actualiza sola al desplegar la web.
+#  Netlify: lleva el logo de la empresa, se abre en vertical (como
+#  cualquier app de teléfono) y se actualiza sola cuando se
+#  despliega la web, sin reinstalar nada.
+#
+#  Al terminar, el APK queda para descargar en la pestaña
+#  "Actions" del repositorio.
 # ============================================================
 
 name: APK Android
@@ -25,7 +26,7 @@ jobs:
   construir:
     runs-on: ubuntu-latest
 
-    # Imagen con Android SDK + Java 17 + Node ya instalados.
+    # Imagen con Android SDK + Java 17 ya instalados.
     container:
       image: ghcr.io/cirruslabs/android-sdk:34
 
@@ -42,10 +43,23 @@ jobs:
         run: npm install --omit=optional
 
       - name: Instalar Capacitor
-        run: npm install --no-save @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
+        run: npm install --no-save @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6 @capacitor/assets@3
 
       - name: Crear el proyecto Android
         run: npx cap add android
+
+      - name: Poner el logo de la empresa como icono
+        # Genera todos los tamaños de icono y la pantalla de inicio a partir
+        # de las imágenes de assets/ (hechas con el logo real del negocio).
+        run: npx @capacitor/assets generate --android --assetPath assets
+
+      - name: Dejar la app en vertical (formato de teléfono)
+        # Se fija la orientación vertical y se impide que el sistema
+        # reinicie la pantalla al girar el teléfono.
+        run: |
+          MANIFIESTO=android/app/src/main/AndroidManifest.xml
+          sed -i 's|android:name="com.carnicosmyc.gestion.MainActivity"|android:name="com.carnicosmyc.gestion.MainActivity"\n            android:screenOrientation="portrait"|' $MANIFIESTO
+          grep -q 'screenOrientation' $MANIFIESTO && echo "Vertical configurado" || echo "Aviso: no se pudo fijar la orientación"
 
       - name: Sincronizar la app
         run: npx cap sync android
@@ -55,6 +69,12 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Renombrar el APK con el nombre del negocio
+        run: |
+          cd android/app/build/outputs/apk/debug
+          for f in *.apk; do mv "$f" "Carnicos-M&C.apk" 2>/dev/null || true; done
+          ls -lh
 
       - name: Guardar el APK como resultado
         uses: actions/upload-artifact@v4
