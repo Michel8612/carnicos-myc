@@ -1,13 +1,16 @@
 # ============================================================
 #  Compilar la app de Android (APK) — Cárnicos M&C
 #
-#  Todo se compila EN GITHUB: aquí no hay que instalar Android
-#  Studio ni el SDK. Al terminar, el APK queda para descargar en
-#  la pestaña "Actions" del repositorio (y en Releases si se
-#  lanza con una etiqueta v1.0.0, v1.1.0...).
+#  Se compila EN GITHUB dentro de una imagen Docker que ya trae
+#  el SDK de Android, Java y Node instalados. Así no hay que
+#  descargar nada en la PC ni esperar a que GitHub instale el SDK
+#  en cada intento: es más rápido y siempre igual.
+#
+#  Al terminar, el APK (unos 4 MB) queda para descargar en la
+#  pestaña "Actions" del repositorio.
 #
 #  La app es un contenedor nativo que abre el sistema alojado en
-#  Netlify, así que se actualiza sola cuando se despliega la web.
+#  Netlify, así que se actualiza sola al desplegar la web.
 # ============================================================
 
 name: APK Android
@@ -22,6 +25,10 @@ jobs:
   construir:
     runs-on: ubuntu-latest
 
+    # Imagen con Android SDK + Java 17 + Node ya instalados.
+    container:
+      image: ghcr.io/cirruslabs/android-sdk:34
+
     steps:
       - name: Descargar el código
         uses: actions/checkout@v4
@@ -31,20 +38,11 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Preparar Java (necesario para Android)
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-
-      - name: Preparar el SDK de Android
-        uses: android-actions/setup-android@v3
-
-      - name: Instalar dependencias
-        run: npm install
+      - name: Instalar dependencias del proyecto
+        run: npm install --omit=optional
 
       - name: Instalar Capacitor
-        run: npm install --no-save @capacitor/core @capacitor/cli @capacitor/android
+        run: npm install --no-save @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
 
       - name: Crear el proyecto Android
         run: npx cap add android
@@ -54,7 +52,9 @@ jobs:
 
       - name: Compilar el APK
         working-directory: android
-        run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Guardar el APK como resultado
         uses: actions/upload-artifact@v4
@@ -63,8 +63,8 @@ jobs:
           path: android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
-      # Si se publica con una etiqueta (v1.0.0), además se adjunta
-      # a una "Release" para poder compartir el enlace de descarga.
+      # Con una etiqueta (v1.0.0) además se publica en Releases,
+      # para poder compartir un enlace de descarga directo.
       - name: Publicar en Releases
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
