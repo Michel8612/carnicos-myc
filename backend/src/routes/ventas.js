@@ -12,6 +12,7 @@
 import { Router } from 'express';
 import db from '../db/index.js';
 import { requiereSesion } from '../middleware/auth.js';
+import { anotar } from '../libro.js';
 
 const router = Router();
 router.use(requiereSesion);
@@ -64,7 +65,7 @@ router.post('/', async (req, res) => {
         let msg = `No hay suficiente "${nombreProd}" en ese almacén (hay ${hayAqui}, necesita ${it.cantidad}).`;
         if (enOtros.length > 0) {
           const lista = enOtros.map((o) => `${o.almacen}: ${o.cantidad}`).join(', ');
-          msg += ` Sí hay en otro almacén → ${lista}. Cambie el almacén de la venta o traslade el producto.`;
+          msg += ` Sí hay en otro almacén â†’ ${lista}. Cambie el almacén de la venta o traslade el producto.`;
         }
         throw new Error(msg);
       }
@@ -179,196 +180,197 @@ router.post('/:id/cobrar', async (req, res) => {
   res.json({ ok: true, estado: nuevoEstado });
 });
 
+
+
 // ============================================================
-//  PUNTO DE VENTA DEL DÍA (hoja del vendedor, atada a su almacén)
+//  ÁREA DE VENTAS — inventario PROPIO del vendedor
 //
-//  Cada vendedor vende SOLO de su almacén asignado. La hoja muestra
-//  los productos con existencia, su precio, lo vendido HOY y el dinero
-//  recogido, con un total (cuadre). Lo vendido/dinero es de HOY: al
-//  cambiar el día se muestra en cero solo (no hay que borrar nada),
-//  pero la existencia se conserva. Los productos agotados no aparecen.
-//  El corte del día usa la hora de Cuba (America/Havana).
+//  El área de ventas NO depende del almacén: son cosas distintas.
+//  Cada vendedor arma su propia lista de productos (los agrega él,
+//  con su costo y su precio de venta) y esa lista se le guarda.
+//
+//  Durante el día anota lo VENDIDO de cada producto. Al pulsar
+//  "Reiniciar jornada" se descuenta lo vendido de la existencia,
+//  se anota todo en el libro de contabilidad (con fecha y hora) y
+//  el contador de vendido vuelve a cero. Los productos que quedan
+//  en cero se pueden eliminar cuando el vendedor quiera.
 // ============================================================
 
 const ES_JEFE = (rol) => rol === 'dueno' || rol === 'admin' || rol === 'proveedor';
 
-// Almacén de trabajo: el del vendedor (del token) o el que el dueño elija.
-function almacenDeTrabajo(req, fuente) {
-  let almacenId = req.usuario.almacen_id || null;
-  if (ES_JEFE(req.usuario.rol) && fuente && fuente.almacen_id) {
-    almacenId = Number(fuente.almacen_id);
+// De quién es la hoja que se está viendo. Cada vendedor ve la suya;
+// el dueño puede mirar la de cualquiera pasando ?usuario_id=.
+function duenoDeLaHoja(req, fuente) {
+  if (ES_JEFE(req.usuario.rol) && fuente && fuente.usuario_id) {
+    return Number(fuente.usuario_id);
   }
-  return almacenId;
+  return req.usuario.id;
 }
 
-// ---------- Hoja de venta del día ----------
+// ---------- Hoja del día ----------
 router.get('/hoja', async (req, res) => {
   const esJefe = ES_JEFE(req.usuario.rol);
-  const almacenId = almacenDeTrabajo(req, req.query);
+  const usuarioId = duenoDeLaHoja(req, req.query);
 
-  if (!almacenId) {
-    // Vendedor sin almacén asignado, o dueño que aún no eligió uno.
-    const almacenes = esJefe
-      ? await db.prepare('SELECT id, nombre FROM almacenes ORDER BY nombre').all()
-      : [];
-    return res.json({ almacen: null, requiere_almacen: true, es_jefe: esJefe, almacenes, productos: [], total_dinero: 0 });
-  }
-
-  const almacen = await db.prepare('SELECT id, nombre FROM almacenes WHERE id = ?').get(almacenId);
-
-  // Productos con existencia > 0 en ese almacén + lo vendido (jornada).
   const productos = await db.prepare(`
-    SELECT p.id AS producto_id, p.nombre, u.abreviatura AS unidad,
-           p.precio_venta, e.cantidad AS existencia,
-           COALESCE(j.vendido, 0) AS vendido
-    FROM existencias e
-    JOIN productos p ON p.id = e.producto_id
-    LEFT JOIN unidades u ON u.id = p.unidad_id
-    LEFT JOIN jornada_ventas j ON j.producto_id = p.id AND j.almacen_id = e.almacen_id
-    WHERE e.almacen_id = ? AND e.cantidad > 0 AND p.activo = 1
-      AND p.tipo IN ('terminado', 'reventa')
-    ORDER BY p.nombre
-  `).all(almacenId);
+    SELECT id, nombre, unidad, cantidad, costo_unitario, precio_venta, vendido
+    FROM venta_inventario
+    WHERE usuario_id = ?
+    ORDER BY nombre
+  `).all(usuarioId);
 
-  let total = 0;
+  let totalIngreso = 0, totalCosto = 0, valorExistencia = 0;
   const filas = productos.map((p) => {
-    const totalFila = Number(((p.vendido || 0) * (p.precio_venta || 0)).toFixed(2));
-    total += totalFila;
-    return {
-      producto_id: p.producto_id, nombre: p.nombre, unidad: p.unidad || '',
-      existencia: p.existencia, precio_venta: p.precio_venta || 0,
-      vendido: p.vendido || 0, total: totalFila,
-    };
+    const total = Number((p.vendido * p.precio_venta).toFixed(2));       // dinero de lo vendido
+    const costoVendido = Number((p.vendido * p.costo_unitario).toFixed(2));
+    const ganancia = Number((total - costoVendido).toFixed(2));
+    totalIngreso += total;
+    totalCosto += costoVendido;
+    valorExistencia += Number((p.cantidad * p.costo_unitario).toFixed(2));
+    return { ...p, total, costo_vendido: costoVendido, ganancia };
   });
 
-  res.json({ almacen, requiere_almacen: false, es_jefe: esJefe, productos: filas, total_dinero: Number(total.toFixed(2)) });
+  // Vendedores, para que el dueño pueda elegir de quién ver la hoja.
+  let vendedores = [];
+  if (esJefe) {
+    vendedores = await db.prepare(
+      "SELECT id, nombre, usuario FROM usuarios WHERE activo = 1 AND rol IN ('ventas','dueno','admin') ORDER BY nombre"
+    ).all();
+  }
+
+  res.json({
+    es_jefe: esJefe,
+    usuario_id: usuarioId,
+    vendedores,
+    productos: filas,
+    total_dinero: Number(totalIngreso.toFixed(2)),
+    total_costo: Number(totalCosto.toFixed(2)),
+    total_ganancia: Number((totalIngreso - totalCosto).toFixed(2)),
+    valor_existencia: Number(valorExistencia.toFixed(2)),
+  });
 });
 
-// ---------- Guardar cuánto se ha vendido de un producto (NO toca el stock) ----------
-router.post('/jornada', async (req, res) => {
-  const almacenId = almacenDeTrabajo(req, req.body);
-  const productoId = Number(req.body.producto_id);
+// ---------- Agregar un producto a la hoja ----------
+router.post('/producto', async (req, res) => {
+  const usuarioId = duenoDeLaHoja(req, req.body);
+  const { nombre, unidad, cantidad, costo_unitario, precio_venta } = req.body;
+  if (!nombre || !String(nombre).trim()) {
+    return res.status(400).json({ error: 'Escriba el nombre del producto.' });
+  }
+  const r = await db.prepare(`
+    INSERT INTO venta_inventario (usuario_id, nombre, unidad, cantidad, costo_unitario, precio_venta)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(
+    usuarioId, String(nombre).trim(), unidad || 'u',
+    Number(cantidad) || 0, Number(costo_unitario) || 0, Number(precio_venta) || 0
+  );
+  res.json({ ok: true, id: r.lastInsertRowid });
+});
+
+// ---------- Editar un producto (nombre, cantidad, costo, precio, vendido) ----------
+router.put('/producto/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  const fila = await db.prepare('SELECT * FROM venta_inventario WHERE id = ?').get(id);
+  if (!fila) return res.status(404).json({ error: 'Producto no encontrado.' });
+  if (fila.usuario_id !== req.usuario.id && !ES_JEFE(req.usuario.rol)) {
+    return res.status(403).json({ error: 'Ese producto no es de su hoja.' });
+  }
+  const b = req.body;
+  await db.prepare(`
+    UPDATE venta_inventario
+    SET nombre = ?, unidad = ?, cantidad = ?, costo_unitario = ?, precio_venta = ?, vendido = ?
+    WHERE id = ?
+  `).run(
+    b.nombre !== undefined ? String(b.nombre).trim() : fila.nombre,
+    b.unidad !== undefined ? b.unidad : fila.unidad,
+    b.cantidad !== undefined ? Number(b.cantidad) : fila.cantidad,
+    b.costo_unitario !== undefined ? Number(b.costo_unitario) : fila.costo_unitario,
+    b.precio_venta !== undefined ? Number(b.precio_venta) : fila.precio_venta,
+    b.vendido !== undefined ? Number(b.vendido) : fila.vendido,
+    id
+  );
+  res.json({ ok: true });
+});
+
+// ---------- Anotar lo vendido de un producto (no toca la existencia) ----------
+router.post('/vendido/:id', async (req, res) => {
+  const id = Number(req.params.id);
   const vendido = Number(req.body.vendido);
-  if (!almacenId) return res.status(400).json({ error: 'No tiene un almacén asignado.' });
-  if (!productoId || Number.isNaN(vendido) || vendido < 0) {
+  if (Number.isNaN(vendido) || vendido < 0) {
     return res.status(400).json({ error: 'Cantidad vendida no válida.' });
   }
-  await db.prepare(`
-    INSERT INTO jornada_ventas (almacen_id, producto_id, vendido) VALUES (?, ?, ?)
-    ON CONFLICT (almacen_id, producto_id) DO UPDATE SET vendido = EXCLUDED.vendido
-  `).run(almacenId, productoId, vendido);
-  res.json({ ok: true });
-});
-
-// ---------- Agregar un producto a la hoja (crea si es nuevo y suma existencia) ----------
-router.post('/agregar-producto', async (req, res) => {
-  const almacenId = almacenDeTrabajo(req, req.body);
-  let { producto_id, nombre, unidad_id, cantidad, precio_venta } = req.body;
-  cantidad = Number(cantidad);
-  precio_venta = Number(precio_venta) || 0;
-  if (!almacenId) return res.status(400).json({ error: 'No tiene un almacén asignado.' });
-  if (!cantidad || cantidad <= 0) return res.status(400).json({ error: 'Indique la cantidad (existencia).' });
-
-  const tx = db.transaction(async () => {
-    let pid = producto_id ? Number(producto_id) : null;
-    if (!pid) {
-      if (!nombre) throw new Error('Indique el nombre del producto.');
-      const ex = await db.prepare("SELECT id FROM productos WHERE lower(nombre) = lower(?) AND activo = 1").get(nombre);
-      if (ex) {
-        pid = ex.id;
-        await db.prepare('UPDATE productos SET precio_venta = ? WHERE id = ?').run(precio_venta, pid);
-      } else {
-        const nuevo = await db.prepare(
-          'INSERT INTO productos (nombre, tipo, unidad_id, precio_venta) VALUES (?, ?, ?, ?)'
-        ).run(nombre, 'reventa', unidad_id || null, precio_venta);
-        pid = nuevo.lastInsertRowid;
-      }
-    } else if (precio_venta > 0) {
-      await db.prepare('UPDATE productos SET precio_venta = ? WHERE id = ?').run(precio_venta, pid);
-    }
-    const exi = await db.prepare('SELECT id FROM existencias WHERE producto_id = ? AND almacen_id = ?').get(pid, almacenId);
-    if (exi) await db.prepare('UPDATE existencias SET cantidad = cantidad + ? WHERE id = ?').run(cantidad, exi.id);
-    else await db.prepare('INSERT INTO existencias (producto_id, almacen_id, cantidad) VALUES (?, ?, ?)').run(pid, almacenId, cantidad);
-    await db.prepare(`
-      INSERT INTO movimientos (producto_id, almacen_id, tipo, cantidad, origen_tipo, usuario_id, nota)
-      VALUES (?, ?, 'entrada', ?, 'manual', ?, 'Alta desde Ventas')
-    `).run(pid, almacenId, cantidad, req.usuario.id);
-    return pid;
-  });
-  res.json({ ok: true, id: await tx() });
-});
-
-// Quita un producto de un almacén; si ya no queda en ningún lado, lo desactiva.
-async function eliminarProductoDeAlmacen(productoId, almacenId) {
-  await db.prepare('DELETE FROM jornada_ventas WHERE producto_id = ? AND almacen_id = ?').run(productoId, almacenId);
-  await db.prepare('DELETE FROM existencias WHERE producto_id = ? AND almacen_id = ?').run(productoId, almacenId);
-  const resto = await db.prepare('SELECT COALESCE(SUM(cantidad),0) AS c FROM existencias WHERE producto_id = ?').get(productoId);
-  if (!resto.c || resto.c <= 0) {
-    await db.prepare('UPDATE productos SET activo = 0 WHERE id = ?').run(productoId);
+  const fila = await db.prepare('SELECT * FROM venta_inventario WHERE id = ?').get(id);
+  if (!fila) return res.status(404).json({ error: 'Producto no encontrado.' });
+  if (fila.usuario_id !== req.usuario.id && !ES_JEFE(req.usuario.rol)) {
+    return res.status(403).json({ error: 'Ese producto no es de su hoja.' });
   }
-}
-
-// ---------- Quitar un producto de la hoja (la X roja) ----------
-router.post('/quitar-producto', async (req, res) => {
-  const almacenId = almacenDeTrabajo(req, req.body);
-  const productoId = Number(req.body.producto_id);
-  if (!almacenId || !productoId) return res.status(400).json({ error: 'Falta el producto.' });
-  await eliminarProductoDeAlmacen(productoId, almacenId);
+  await db.prepare('UPDATE venta_inventario SET vendido = ? WHERE id = ?').run(vendido, id);
   res.json({ ok: true });
 });
 
-// ---------- Reiniciar jornada: resta lo vendido de la existencia, registra el
-//            dinero, deja vendido en 0 y borra los productos que llegan a 0 ----------
+// ---------- Eliminar un producto de la hoja ----------
+router.delete('/producto/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  const fila = await db.prepare('SELECT * FROM venta_inventario WHERE id = ?').get(id);
+  if (!fila) return res.json({ ok: true });
+  if (fila.usuario_id !== req.usuario.id && !ES_JEFE(req.usuario.rol)) {
+    return res.status(403).json({ error: 'Ese producto no es de su hoja.' });
+  }
+  await db.prepare('DELETE FROM venta_inventario WHERE id = ?').run(id);
+  res.json({ ok: true });
+});
+
+// ---------- Reiniciar jornada ----------
+// Descuenta lo vendido de la existencia, anota cada venta en el libro
+// de contabilidad (queda con fecha y hora) y pone el vendido en cero.
 router.post('/reiniciar', async (req, res) => {
-  const almacenId = almacenDeTrabajo(req, req.body);
-  if (!almacenId) return res.status(400).json({ error: 'No tiene un almacén asignado.' });
+  const usuarioId = duenoDeLaHoja(req, req.body);
 
-  const tx = db.transaction(async () => {
-    const filas = await db.prepare(`
-      SELECT j.producto_id, j.vendido, p.nombre, p.precio_venta,
-             COALESCE(e.cantidad, 0) AS existencia, e.id AS ex_id
-      FROM jornada_ventas j
-      JOIN productos p ON p.id = j.producto_id
-      LEFT JOIN existencias e ON e.producto_id = j.producto_id AND e.almacen_id = j.almacen_id
-      WHERE j.almacen_id = ? AND j.vendido > 0
-    `).all(almacenId);
+  const filas = await db.prepare(
+    'SELECT * FROM venta_inventario WHERE usuario_id = ? AND vendido > 0'
+  ).all(usuarioId);
 
-    let totalDinero = 0;
-    for (const f of filas) {
-      const resta = Math.min(f.vendido, f.existencia); // no dejar negativo
-      const monto = Number((f.vendido * (f.precio_venta || 0)).toFixed(2));
-      totalDinero += monto;
-      if (f.ex_id) await db.prepare('UPDATE existencias SET cantidad = cantidad - ? WHERE id = ?').run(resta, f.ex_id);
+  let totalDinero = 0, totalCosto = 0;
+  for (const f of filas) {
+    const ingreso = Number((f.vendido * f.precio_venta).toFixed(2));
+    const costo = Number((f.vendido * f.costo_unitario).toFixed(2));
+    totalDinero += ingreso;
+    totalCosto += costo;
+
+    // Descontar de la existencia (sin bajar de cero).
+    const nueva = Math.max(0, Number((f.cantidad - f.vendido).toFixed(3)));
+    await db.prepare('UPDATE venta_inventario SET cantidad = ?, vendido = 0 WHERE id = ?').run(nueva, f.id);
+
+    // Dejar constancia en el libro del contador.
+    await anotar({
+      tipo: 'venta',
+      concepto: `Venta del día — ${f.nombre}`,
+      producto: f.nombre,
+      cantidad: f.vendido,
+      unidad: f.unidad,
+      costo,
+      ingreso,
+      area: 'ventas',
+      usuario: req.usuario,
+    });
+
+    // Y en la caja del negocio.
+    if (ingreso > 0) {
       await db.prepare(`
-        INSERT INTO movimientos (producto_id, almacen_id, tipo, cantidad, origen_tipo, usuario_id, nota)
-        VALUES (?, ?, 'salida', ?, 'venta', ?, 'Cierre de jornada')
-      `).run(f.producto_id, almacenId, resta, req.usuario.id);
-      if (monto > 0) {
-        const v = await db.prepare(`
-          INSERT INTO ventas (cliente, total, pagado, estado, usuario_id) VALUES ('Mostrador', ?, ?, 'pagada', ?)
-        `).run(monto, monto, req.usuario.id);
-        await db.prepare(`
-          INSERT INTO ventas_detalle (venta_id, producto_id, cantidad, precio_unitario) VALUES (?, ?, ?, ?)
-        `).run(v.lastInsertRowid, f.producto_id, f.vendido, f.precio_venta || 0);
-        await db.prepare(`
-          INSERT INTO caja (tipo, concepto, monto, moneda, origen_tipo, origen_id, usuario_id)
-          VALUES ('ingreso', ?, ?, 'CUP', 'venta', ?, ?)
-        `).run('Venta ' + f.nombre, monto, v.lastInsertRowid, req.usuario.id);
-      }
+        INSERT INTO caja (tipo, concepto, monto, moneda, origen_tipo, usuario_id)
+        VALUES ('ingreso', ?, ?, 'CUP', 'venta', ?)
+      `).run('Venta ' + f.nombre, ingreso, req.usuario.id);
     }
+  }
 
-    // Dejar la jornada en cero.
-    await db.prepare('UPDATE jornada_ventas SET vendido = 0 WHERE almacen_id = ?').run(almacenId);
-
-    // Borrar del almacén los productos que quedaron en cero (o menos).
-    const enCero = await db.prepare('SELECT producto_id FROM existencias WHERE almacen_id = ? AND cantidad <= 0').all(almacenId);
-    for (const p of enCero) await eliminarProductoDeAlmacen(p.producto_id, almacenId);
-
-    return Number(totalDinero.toFixed(2));
+  res.json({
+    ok: true,
+    total_dinero: Number(totalDinero.toFixed(2)),
+    total_costo: Number(totalCosto.toFixed(2)),
+    total_ganancia: Number((totalDinero - totalCosto).toFixed(2)),
+    productos: filas.length,
   });
-
-  const total = await tx();
-  res.json({ ok: true, total_dinero: total });
 });
 
 export default router;
+

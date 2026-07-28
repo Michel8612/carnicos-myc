@@ -14,6 +14,7 @@
 import { Router } from 'express';
 import db from '../db/index.js';
 import { requiereSesion } from '../middleware/auth.js';
+import { anotar } from '../libro.js';
 
 const router = Router();
 router.use(requiereSesion);
@@ -270,6 +271,25 @@ router.post('/:id/producir', async (req, res) => {
   });
 
   const resultado = await tx();
+
+  // Que el contador lo vea: la cocina consumió materia prima por este valor.
+  // Producir NO es una pérdida: es convertir materia prima en producto
+  // terminado. El costo se reconoce cuando el producto se VENDE (eso lo
+  // hace el área de ventas). Aquí se guarda el valor como referencia.
+  await anotar({
+    tipo: 'produccion',
+    concepto: `Producción — ${receta.nombre}`,
+    producto: receta.nombre,
+    cantidad: cantidadProducida,
+    unidad: receta.rinde_unidad || '',
+    costo: 0,
+    ingreso: 0,
+    valor: resultado.costoTotal,
+    area: 'cocina',
+    usuario: req.usuario,
+    nota: nota || null,
+  });
+
   res.json({
     ok: true,
     produccion_id: resultado.prodId,
@@ -310,3 +330,4 @@ router.get('/historial/lista', async (req, res) => {
 });
 
 export default router;
+

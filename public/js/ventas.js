@@ -1,30 +1,30 @@
 // ============================================================
-//  Ventas del día — Cárnicos M&C (IPV editable)
+//  Área de Ventas — Cárnicos M&C
 //
-//  Hoja atada al ALMACÉN del vendedor. Columnas: producto, cantidad
-//  (existencia), unidad, precio, VENDIDO (editable), total (vendido×
-//  precio) y una ✕ para borrar el producto. El total de arriba es la
-//  suma de todos los totales. Al pulsar "Reiniciar jornada" se resta
-//  lo vendido de la existencia, se registra el dinero, se pone vendido
-//  en 0 y los productos que llegan a 0 se borran solos.
+//  Cada vendedor lleva SU PROPIA lista de productos: los agrega él,
+//  con su costo y su precio de venta, y se le quedan guardados.
+//  NO depende del almacén (son áreas distintas).
+//
+//  Durante el día anota lo VENDIDO de cada producto y ve al momento
+//  su total y su ganancia. Al pulsar "Reiniciar jornada" se descuenta
+//  lo vendido de la cantidad y todo pasa al libro de Contabilidad.
+//  Los productos que quedan en cero se pueden eliminar con la ✕.
 // ============================================================
 
+// Ventas: el rol Ventas y el Dueño (que puede todo, en todas partes).
 if (!soloRoles(['ventas'])) { throw new Error('sin acceso'); }
 
-let almacenSeleccion = null;   // el dueño puede elegir almacén
-let UNIDADES = [];
+let verUsuarioId = null;   // el dueño puede mirar la hoja de otro vendedor
 
 const hojaBody = document.getElementById('hojaBody');
 const tablaHoja = document.getElementById('tablaHoja');
 const vacioHoja = document.getElementById('vacioHoja');
-const avisoAlmacen = document.getElementById('avisoAlmacen');
-const selectorBox = document.getElementById('selectorAlmacenBox');
-const selectorAlmacen = document.getElementById('selectorAlmacen');
+const selectorBox = document.getElementById('selectorVendedorBox');
+const selectorVendedor = document.getElementById('selectorVendedor');
 const modalProd = document.getElementById('modalProd');
 const mpError = document.getElementById('mpError');
 
 const money = (n) => Number(n ?? 0).toLocaleString('es-CU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const fmt = (n) => Number(n ?? 0).toLocaleString('es-CU', { maximumFractionDigits: 3 });
 
 document.getElementById('fechaHoy').textContent = new Date().toLocaleDateString('es-CU', { weekday: 'long', day: 'numeric', month: 'long' });
 
@@ -33,143 +33,160 @@ if (esDueno()) {
   nav.style.display = ''; nav.href = 'admin.html';
 }
 
-async function cargarHoja() {
-  let data;
-  try { data = await API.ventasHoja(almacenSeleccion); }
+async function cargar() {
+  let d;
+  try { d = await API.ventasHoja(verUsuarioId); }
   catch (e) { vacioHoja.style.display = 'block'; vacioHoja.textContent = 'No se pudo cargar: ' + e.message; return; }
 
-  if (data.requiere_almacen) {
-    tablaHoja.style.display = 'none'; vacioHoja.style.display = 'none';
-    document.getElementById('cuadreTotal').textContent = '0.00';
-    document.getElementById('almacenNombre').textContent = '—';
-    if (data.es_jefe) {
-      selectorBox.style.display = ''; avisoAlmacen.style.display = 'none';
-      selectorAlmacen.innerHTML = '<option value="">Elegir…</option>' +
-        (data.almacenes || []).map((a) => `<option value="${a.id}">${a.nombre}</option>`).join('');
-    } else {
-      avisoAlmacen.style.display = 'block'; selectorBox.style.display = 'none';
-    }
-    return;
-  }
+  // Totales de arriba.
+  document.getElementById('tVenta').textContent = money(d.total_dinero);
+  document.getElementById('tCosto').textContent = money(d.total_costo);
+  document.getElementById('tGanancia').textContent = money(d.total_ganancia);
+  document.getElementById('tExist').textContent = money(d.valor_existencia);
 
-  avisoAlmacen.style.display = 'none';
-  document.getElementById('almacenNombre').textContent = data.almacen ? data.almacen.nombre : '—';
-  document.getElementById('cuadreTotal').textContent = money(data.total_dinero);
-
-  if (data.es_jefe) {
+  // El dueño puede cambiar de vendedor.
+  const yo = getUsuario() || {};
+  if (d.es_jefe && d.vendedores.length) {
     selectorBox.style.display = '';
-    if (!selectorAlmacen.value && data.almacen) {
-      try {
-        const alms = await API.almacenes();
-        selectorAlmacen.innerHTML = alms.map((a) => `<option value="${a.id}">${a.nombre}</option>`).join('');
-        selectorAlmacen.value = String(data.almacen.id);
-      } catch {}
-    }
+    selectorVendedor.innerHTML = d.vendedores
+      .map((v) => `<option value="${v.id}">${v.nombre}</option>`).join('');
+    selectorVendedor.value = String(d.usuario_id);
+    const actual = d.vendedores.find((v) => v.id === d.usuario_id);
+    document.getElementById('vendedorNombre').textContent = actual ? actual.nombre : (yo.nombre || '');
+  } else {
+    document.getElementById('vendedorNombre').textContent = yo.nombre || '';
   }
 
-  if (!data.productos.length) {
+  if (!d.productos.length) {
     tablaHoja.style.display = 'none'; vacioHoja.style.display = 'block'; hojaBody.innerHTML = '';
     return;
   }
 
   vacioHoja.style.display = 'none'; tablaHoja.style.display = '';
   hojaBody.innerHTML = '';
-  data.productos.forEach((p) => {
+  d.productos.forEach((p) => {
     const tr = document.createElement('tr');
+    if (Number(p.cantidad) <= 0) tr.classList.add('fila-cero');
     tr.innerHTML = `
-      <td style="text-align:left"><b>${p.nombre}</b></td>
-      <td>${fmt(p.existencia)}</td>
-      <td>${p.unidad}</td>
-      <td>${money(p.precio_venta)}</td>
-      <td><input type="number" class="vendido" min="0" step="0.01" value="${p.vendido || ''}" placeholder="0" data-id="${p.producto_id}" data-precio="${p.precio_venta}"></td>
-      <td class="tot" data-id="${p.producto_id}">${money(p.total)}</td>
-      <td><button class="btn-x" data-id="${p.producto_id}" data-nombre="${p.nombre}" title="Borrar producto">×</button></td>`;
+      <td><input class="nombre campo" data-id="${p.id}" data-campo="nombre" value="${p.nombre}"></td>
+      <td><input type="number" step="0.01" class="campo" data-id="${p.id}" data-campo="cantidad" value="${p.cantidad}"></td>
+      <td>
+        <select class="campo" data-id="${p.id}" data-campo="unidad">
+          ${['u','lb','kg','g','L','caja'].map((u) => `<option value="${u}"${p.unidad === u ? ' selected' : ''}>${u}</option>`).join('')}
+        </select>
+      </td>
+      <td><input type="number" step="0.01" class="campo" data-id="${p.id}" data-campo="costo_unitario" value="${p.costo_unitario}"></td>
+      <td><input type="number" step="0.01" class="campo" data-id="${p.id}" data-campo="precio_venta" value="${p.precio_venta}"></td>
+      <td><input type="number" step="0.01" class="vendido" data-id="${p.id}" value="${p.vendido || ''}" placeholder="0"></td>
+      <td class="col-total">${money(p.total)}</td>
+      <td class="col-gan ${p.ganancia >= 0 ? 'g-pos' : 'g-neg'}">${money(p.ganancia)}</td>
+      <td><button class="btn-x" data-id="${p.id}" data-nombre="${p.nombre}" title="Eliminar producto">×</button></td>`;
     hojaBody.appendChild(tr);
   });
 
-  // Guardar lo vendido al cambiar; recalcular total de la fila y el cuadre.
-  hojaBody.querySelectorAll('input.vendido').forEach((inp) => {
-    inp.addEventListener('change', () => guardarVendido(inp));
-    inp.addEventListener('input', () => recalcFila(inp));
+  // Guardar al salir de la casilla; recalcular mientras se escribe.
+  hojaBody.querySelectorAll('.campo').forEach((el) => {
+    el.addEventListener('change', () => guardarCampo(el));
+    el.addEventListener('input', recalcular);
+  });
+  hojaBody.querySelectorAll('.vendido').forEach((el) => {
+    el.addEventListener('change', () => guardarVendido(el));
+    el.addEventListener('input', recalcular);
   });
   hojaBody.querySelectorAll('.btn-x').forEach((b) => {
-    b.addEventListener('click', () => quitar(Number(b.dataset.id), b.dataset.nombre));
+    b.addEventListener('click', () => eliminar(Number(b.dataset.id), b.dataset.nombre));
   });
 }
 
-function recalcFila(inp) {
-  const precio = Number(inp.dataset.precio) || 0;
-  const vendido = Number(inp.value) || 0;
-  const celda = hojaBody.querySelector(`td.tot[data-id="${inp.dataset.id}"]`);
-  if (celda) celda.textContent = money(vendido * precio);
-  // recalcular cuadre total
-  let total = 0;
-  hojaBody.querySelectorAll('input.vendido').forEach((i) => { total += (Number(i.value) || 0) * (Number(i.dataset.precio) || 0); });
-  document.getElementById('cuadreTotal').textContent = money(total);
+// Recalcula totales y ganancias en pantalla, sin ir al servidor.
+function recalcular() {
+  let venta = 0, costo = 0, existencia = 0;
+  hojaBody.querySelectorAll('tr').forEach((tr) => {
+    const val = (campo) => Number(tr.querySelector(`[data-campo="${campo}"]`)?.value) || 0;
+    const vendido = Number(tr.querySelector('.vendido')?.value) || 0;
+    const precio = val('precio_venta');
+    const costoU = val('costo_unitario');
+    const cantidad = val('cantidad');
+
+    const total = vendido * precio;
+    const ganancia = total - vendido * costoU;
+    venta += total; costo += vendido * costoU; existencia += cantidad * costoU;
+
+    const celdaT = tr.querySelector('.col-total');
+    const celdaG = tr.querySelector('.col-gan');
+    if (celdaT) celdaT.textContent = money(total);
+    if (celdaG) {
+      celdaG.textContent = money(ganancia);
+      celdaG.className = 'col-gan ' + (ganancia >= 0 ? 'g-pos' : 'g-neg');
+    }
+  });
+  document.getElementById('tVenta').textContent = money(venta);
+  document.getElementById('tCosto').textContent = money(costo);
+  document.getElementById('tGanancia').textContent = money(venta - costo);
+  document.getElementById('tExist').textContent = money(existencia);
 }
 
-async function guardarVendido(inp) {
-  const vendido = Number(inp.value) || 0;
-  const datos = { producto_id: Number(inp.dataset.id), vendido };
-  if (esDueno() && almacenSeleccion) datos.almacen_id = almacenSeleccion;
-  try { await API.ventasJornada(datos); } catch (e) { alert(e.message); }
+async function guardarCampo(el) {
+  const id = Number(el.dataset.id);
+  const campo = el.dataset.campo;
+  const valor = (campo === 'nombre' || campo === 'unidad') ? el.value : Number(el.value) || 0;
+  try { await API.ventaProductoEditar(id, { [campo]: valor }); }
+  catch (e) { alert('No se pudo guardar: ' + e.message); }
 }
 
-async function quitar(productoId, nombre) {
-  if (!confirm(`¿Borrar "${nombre}" de la lista? Se quita del almacén.`)) return;
-  const datos = { producto_id: productoId };
-  if (esDueno() && almacenSeleccion) datos.almacen_id = almacenSeleccion;
-  try { await API.ventasQuitarProducto(datos); await cargarHoja(); }
+async function guardarVendido(el) {
+  try { await API.ventaVendido(Number(el.dataset.id), Number(el.value) || 0); }
+  catch (e) { alert('No se pudo guardar: ' + e.message); }
+}
+
+async function eliminar(id, nombre) {
+  if (!confirm(`¿Eliminar "${nombre}" de su lista de venta?`)) return;
+  try { await API.ventaProductoBorrar(id); await cargar(); }
   catch (e) { alert(e.message); }
 }
 
 // ---- Reiniciar jornada ----
 document.getElementById('btnReiniciar').addEventListener('click', async () => {
-  if (!confirm('¿Reiniciar la jornada? Se restará lo vendido de la existencia y el conteo de vendido volverá a cero. Los productos que lleguen a cero se borrarán.')) return;
-  const datos = {};
-  if (esDueno() && almacenSeleccion) datos.almacen_id = almacenSeleccion;
+  if (!confirm('¿Reiniciar la jornada?\n\nSe descuenta lo vendido de la cantidad, queda registrado en Contabilidad y el conteo de vendido vuelve a cero.')) return;
   try {
-    const r = await API.ventasReiniciar(datos);
-    alert('Jornada reiniciada. Dinero de la jornada: ' + money(r.total_dinero));
-    await cargarHoja();
+    const r = await API.ventasReiniciar(verUsuarioId ? { usuario_id: verUsuarioId } : {});
+    alert(`Jornada cerrada.\n\nVenta: ${money(r.total_dinero)}\nCosto: ${money(r.total_costo)}\nGanancia: ${money(r.total_ganancia)}\n\nYa aparece en Contabilidad.`);
+    await cargar();
   } catch (e) { alert(e.message); }
 });
 
 // ---- Popup agregar producto ----
-async function abrirModalProd() {
+function abrirModal() {
   mpError.style.display = 'none';
-  document.getElementById('mpNombre').value = '';
-  document.getElementById('mpCantidad').value = '';
-  document.getElementById('mpPrecio').value = '';
-  if (!UNIDADES.length) {
-    try { UNIDADES = await API.unidades(); } catch { UNIDADES = []; }
-  }
-  document.getElementById('mpUnidad').innerHTML = UNIDADES.map((u) => `<option value="${u.id}">${u.nombre} (${u.abreviatura})</option>`).join('');
+  ['mpNombre', 'mpCantidad', 'mpCosto', 'mpPrecio'].forEach((id) => { document.getElementById(id).value = ''; });
   modalProd.classList.add('abierto');
+  document.getElementById('mpNombre').focus();
 }
-function cerrarModalProd() { modalProd.classList.remove('abierto'); }
+function cerrarModal() { modalProd.classList.remove('abierto'); }
 
-document.getElementById('btnAgregarProd').addEventListener('click', abrirModalProd);
-document.getElementById('mpCancelar').addEventListener('click', cerrarModalProd);
-modalProd.addEventListener('click', (e) => { if (e.target === modalProd) cerrarModalProd(); });
+document.getElementById('btnAgregarProd').addEventListener('click', abrirModal);
+document.getElementById('mpCancelar').addEventListener('click', cerrarModal);
+modalProd.addEventListener('click', (e) => { if (e.target === modalProd) cerrarModal(); });
 document.getElementById('mpGuardar').addEventListener('click', async () => {
   mpError.style.display = 'none';
   const nombre = document.getElementById('mpNombre').value.trim();
-  const cantidad = Number(document.getElementById('mpCantidad').value);
-  const unidad_id = Number(document.getElementById('mpUnidad').value) || null;
-  const precio_venta = Number(document.getElementById('mpPrecio').value) || 0;
   if (!nombre) { mpError.style.display = 'block'; mpError.textContent = 'Escriba el nombre del producto.'; return; }
-  if (!cantidad || cantidad <= 0) { mpError.style.display = 'block'; mpError.textContent = 'Indique la cantidad.'; return; }
-  const datos = { nombre, cantidad, unidad_id, precio_venta };
-  if (esDueno() && almacenSeleccion) datos.almacen_id = almacenSeleccion;
-  try { await API.ventasAgregarProducto(datos); cerrarModalProd(); await cargarHoja(); }
+  const datos = {
+    nombre,
+    unidad: document.getElementById('mpUnidad').value,
+    cantidad: Number(document.getElementById('mpCantidad').value) || 0,
+    costo_unitario: Number(document.getElementById('mpCosto').value) || 0,
+    precio_venta: Number(document.getElementById('mpPrecio').value) || 0,
+  };
+  if (verUsuarioId) datos.usuario_id = verUsuarioId;
+  try { await API.ventaProductoCrear(datos); cerrarModal(); await cargar(); }
   catch (e) { mpError.style.display = 'block'; mpError.textContent = e.message; }
 });
 
-// El dueño cambia de almacén.
-selectorAlmacen.addEventListener('change', () => {
-  almacenSeleccion = selectorAlmacen.value ? Number(selectorAlmacen.value) : null;
-  cargarHoja();
+// El dueño cambia de vendedor.
+selectorVendedor.addEventListener('change', () => {
+  verUsuarioId = selectorVendedor.value ? Number(selectorVendedor.value) : null;
+  cargar();
 });
 
-cargarHoja();
+cargar();

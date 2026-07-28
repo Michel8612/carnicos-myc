@@ -1,15 +1,10 @@
-﻿// ============================================================
-//  Esquema de la base de datos como MODULO JS.
-//
-//  En Netlify (serverless) el codigo se empaqueta y los archivos
-//  sueltos como schema.sql NO viajan con el paquete. Por eso el
-//  esquema vive aqui, como texto, y siempre esta disponible.
-//  Fuente original: schema.sql (mantener ambos en sinc.).
-// ============================================================
+// Esquema de la base de datos como modulo JS.
+// Se genera desde schema.sql: en Netlify los .sql no viajan con la
+// funcion serverless, por eso el esquema vive tambien aqui.
 
 export const SCHEMA_SQL = `-- ============================================================
---  Sistema de GestiÃ³n - Centro de ElaboraciÃ³n de Alimentos
---  Esquema de base de datos  â€”  PostgreSQL (Neon)
+--  Sistema de Gestión - Centro de Elaboración de Alimentos
+--  Esquema de base de datos  —  PostgreSQL (Neon)
 --
 --  Convertido desde SQLite. Reglas aplicadas:
 --   - INTEGER PRIMARY KEY AUTOINCREMENT   -> SERIAL PRIMARY KEY
@@ -22,7 +17,7 @@ export const SCHEMA_SQL = `-- ==================================================
 --  veces es seguro (no borra ni duplica nada).
 -- ============================================================
 
--- ---------- CATÃLOGO ----------
+-- ---------- CATÁLOGO ----------
 
 CREATE TABLE IF NOT EXISTS unidades (
   id          SERIAL PRIMARY KEY,
@@ -41,12 +36,12 @@ CREATE TABLE IF NOT EXISTS productos (
   id            SERIAL PRIMARY KEY,
   nombre        TEXT NOT NULL,
   tipo          TEXT NOT NULL,          -- materia_prima | terminado | reventa
-  categoria     TEXT,                   -- libre: embutidos, panaderÃ­a, lÃ¡cteos...
+  categoria     TEXT,                   -- libre: embutidos, panadería, lácteos...
   unidad_id     INTEGER REFERENCES unidades(id),
   precio_costo  DOUBLE PRECISION DEFAULT 0,
   precio_venta  DOUBLE PRECISION DEFAULT 0,
   stock_minimo  DOUBLE PRECISION DEFAULT 0,
-  activo        INTEGER NOT NULL DEFAULT 1   -- 1 = sÃ­, 0 = no
+  activo        INTEGER NOT NULL DEFAULT 1   -- 1 = sí, 0 = no
 );
 
 -- ---------- USUARIOS ----------
@@ -101,7 +96,7 @@ CREATE TABLE IF NOT EXISTS caja (
   usuario_id  INTEGER REFERENCES usuarios(id)
 );
 
--- ---------- COMPRAS E IMPORTACIÃ“N ----------
+-- ---------- COMPRAS E IMPORTACIÓN ----------
 
 CREATE TABLE IF NOT EXISTS compras (
   id            SERIAL PRIMARY KEY,
@@ -124,7 +119,7 @@ CREATE TABLE IF NOT EXISTS compras_detalle (
   costo_unitario DOUBLE PRECISION DEFAULT 0
 );
 
--- ---------- PRODUCCIÃ“N Y MOTOR DE FÃ“RMULAS ----------
+-- ---------- PRODUCCIÓN Y MOTOR DE FÓRMULAS ----------
 
 CREATE TABLE IF NOT EXISTS formulas (
   id         SERIAL PRIMARY KEY,
@@ -254,13 +249,13 @@ CREATE TABLE IF NOT EXISTS ipv_correcciones (
   descripcion  TEXT NOT NULL
 );
 
--- ---------- RECETAS DE PRODUCCIÃ“N ----------
+-- ---------- RECETAS DE PRODUCCIÓN ----------
 
 CREATE TABLE IF NOT EXISTS recetas (
   id                SERIAL PRIMARY KEY,
   producto_final_id INTEGER NOT NULL REFERENCES productos(id),
   nombre            TEXT NOT NULL,
-  rinde_cantidad    DOUBLE PRECISION NOT NULL DEFAULT 1,   -- cuÃ¡nto produce la receta base
+  rinde_cantidad    DOUBLE PRECISION NOT NULL DEFAULT 1,   -- cuánto produce la receta base
   rinde_unidad      TEXT DEFAULT 'lb',                     -- lb | g | kg (peso del producto final)
   activa            INTEGER NOT NULL DEFAULT 1,
   creada            TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -296,7 +291,7 @@ CREATE TABLE IF NOT EXISTS produccion_consumo (
   costo          DOUBLE PRECISION DEFAULT 0
 );
 
--- ---------- CONFIGURACIÃ“N DEL NEGOCIO ----------
+-- ---------- CONFIGURACIÓN DEL NEGOCIO ----------
 
 CREATE TABLE IF NOT EXISTS config_negocio (
   id            INTEGER PRIMARY KEY CHECK (id = 1),
@@ -308,8 +303,48 @@ CREATE TABLE IF NOT EXISTS config_negocio (
 INSERT INTO config_negocio (id, nombre) VALUES (1, 'Mi Negocio')
   ON CONFLICT (id) DO NOTHING;
 
--- ---------- JORNADA DE VENTAS (IPV editable del dÃ­a por almacÃ©n) ----------
--- Guarda cuÃ¡nto se ha "vendido" hoy de cada producto en cada almacÃ©n.
+-- ---------- INVENTARIO PROPIO DEL PUNTO DE VENTA ----------
+-- El área de ventas NO depende del almacén: son cosas distintas. Cada
+-- vendedor lleva su propia lista de productos (los agrega él), con su
+-- costo y su precio de venta. Lo vendido se anota durante el día y se
+-- descuenta al cerrar la jornada.
+CREATE TABLE IF NOT EXISTS venta_inventario (
+  id             SERIAL PRIMARY KEY,
+  usuario_id     INTEGER NOT NULL REFERENCES usuarios(id),  -- de quién es la hoja
+  nombre         TEXT NOT NULL,
+  unidad         TEXT DEFAULT 'u',            -- lb, kg, g, u...
+  cantidad       DOUBLE PRECISION NOT NULL DEFAULT 0,   -- existencia
+  costo_unitario DOUBLE PRECISION NOT NULL DEFAULT 0,   -- lo que le costó
+  precio_venta   DOUBLE PRECISION NOT NULL DEFAULT 0,   -- a cómo lo vende
+  vendido        DOUBLE PRECISION NOT NULL DEFAULT 0,   -- vendido en la jornada
+  creado         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ---------- LIBRO DE CONTABILIDAD ----------
+-- Todo hecho económico queda aquí con su fecha y hora: ventas del día,
+-- entradas y salidas del almacén, producciones y gastos. Se conserva por
+-- tiempo indefinido hasta que el contador (o el dueño) decida borrarlo.
+CREATE TABLE IF NOT EXISTS contabilidad_registros (
+  id          SERIAL PRIMARY KEY,
+  fecha       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  tipo        TEXT NOT NULL,        -- venta | almacen | produccion | gasto
+  concepto    TEXT NOT NULL,        -- descripción legible
+  producto    TEXT,                 -- a qué producto se refiere
+  cantidad    DOUBLE PRECISION DEFAULT 0,
+  unidad      TEXT,
+  costo       DOUBLE PRECISION DEFAULT 0,   -- lo que costó (afecta el resultado)
+  ingreso     DOUBLE PRECISION DEFAULT 0,   -- lo que entró de dinero
+  ganancia    DOUBLE PRECISION DEFAULT 0,   -- ingreso - costo
+  valor       DOUBLE PRECISION DEFAULT 0,   -- valor de referencia (mercancía movida)
+  area        TEXT,                 -- ventas | almacen | cocina
+  usuario_id  INTEGER REFERENCES usuarios(id),
+  usuario_nombre TEXT,              -- se guarda el nombre por si el usuario se borra
+  nota        TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_contab_fecha ON contabilidad_registros (fecha DESC);
+
+-- ---------- JORNADA DE VENTAS (IPV editable del día por almacén) ----------
+-- Guarda cuánto se ha "vendido" hoy de cada producto en cada almacén.
 -- No toca la existencia hasta que se pulsa "Reiniciar jornada", que resta
 -- lo vendido de la existencia, borra los productos en cero y deja vendido=0.
 CREATE TABLE IF NOT EXISTS jornada_ventas (
@@ -320,7 +355,7 @@ CREATE TABLE IF NOT EXISTS jornada_ventas (
   UNIQUE(almacen_id, producto_id)
 );
 
--- ---------- LICENCIA (periodo de prueba / activaciÃ³n) ----------
+-- ---------- LICENCIA (periodo de prueba / activación) ----------
 
 CREATE TABLE IF NOT EXISTS licencia (
   id             INTEGER PRIMARY KEY CHECK (id = 1),
@@ -331,4 +366,3 @@ CREATE TABLE IF NOT EXISTS licencia (
 `;
 
 export default SCHEMA_SQL;
-

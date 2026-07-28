@@ -142,12 +142,27 @@ const API = {
   ventas: () => apiFetch('/ventas'),
   registrarVenta: (d) => apiFetch('/ventas', { method: 'POST', body: JSON.stringify(d) }),
   deudas: () => apiFetch('/ventas/deudas'),
-  // Hoja de ventas del día (IPV editable atado al almacén del vendedor)
-  ventasHoja: (almacenId) => apiFetch('/ventas/hoja' + (almacenId ? `?almacen_id=${almacenId}` : '')),
-  ventasJornada: (d) => apiFetch('/ventas/jornada', { method: 'POST', body: JSON.stringify(d) }),
-  ventasAgregarProducto: (d) => apiFetch('/ventas/agregar-producto', { method: 'POST', body: JSON.stringify(d) }),
-  ventasQuitarProducto: (d) => apiFetch('/ventas/quitar-producto', { method: 'POST', body: JSON.stringify(d) }),
+  // --- Área de ventas (inventario PROPIO del vendedor, aparte del almacén) ---
+  ventasHoja: (usuarioId) => apiFetch('/ventas/hoja' + (usuarioId ? `?usuario_id=${usuarioId}` : '')),
+  ventaProductoCrear: (d) => apiFetch('/ventas/producto', { method: 'POST', body: JSON.stringify(d) }),
+  ventaProductoEditar: (id, d) => apiFetch(`/ventas/producto/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
+  ventaProductoBorrar: (id) => apiFetch(`/ventas/producto/${id}`, { method: 'DELETE' }),
+  ventaVendido: (id, vendido) => apiFetch(`/ventas/vendido/${id}`, { method: 'POST', body: JSON.stringify({ vendido }) }),
   ventasReiniciar: (d) => apiFetch('/ventas/reiniciar', { method: 'POST', body: JSON.stringify(d || {}) }),
+
+  // --- Contabilidad (lo ve todo) ---
+  contabResumen: () => apiFetch('/contabilidad/resumen'),
+  contabLibro: (f) => {
+    const q = new URLSearchParams();
+    if (f && f.tipo && f.tipo !== 'todos') q.set('tipo', f.tipo);
+    if (f && f.desde) q.set('desde', f.desde);
+    if (f && f.hasta) q.set('hasta', f.hasta);
+    const s = q.toString();
+    return apiFetch('/contabilidad/libro' + (s ? '?' + s : ''));
+  },
+  contabBorrarLinea: (id) => apiFetch(`/contabilidad/libro/${id}`, { method: 'DELETE' }),
+  contabBorrarVarias: (d) => apiFetch('/contabilidad/libro/borrar', { method: 'POST', body: JSON.stringify(d) }),
+  contabMovimientos: () => apiFetch('/contabilidad/movimientos'),
   cobrar: (id, monto, moneda) => apiFetch(`/ventas/${id}/cobrar`, { method: 'POST', body: JSON.stringify({ monto, moneda }) }),
 
   // --- Usuarios ---

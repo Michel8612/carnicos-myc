@@ -37,6 +37,7 @@ import transporteRoutes from './routes/transporte.js';
 import costosRoutes from './routes/costos.js';
 import ipvRoutes from './routes/ipv.js';
 import recetasRoutes from './routes/recetas.js';
+import contabilidadRoutes from './routes/contabilidad.js';
 import configRoutes from './routes/config.js';
 import licenciaRoutes, { bloqueoPorLicencia } from './licencia/rutas.js';
 import { inicializarLicencia } from './licencia/licencia.js';
@@ -98,6 +99,7 @@ app.use('/api/transporte', requiereSesion, escrituraSoloRoles('ventas'), transpo
 app.use('/api/costos', requiereSesion, escrituraSoloRoles(), costosRoutes); // solo dueño escribe; contabilidad solo lee
 app.use('/api/ipv', requiereSesion, escrituraSoloRoles('almacen', 'almacenero'), ipvRoutes);
 app.use('/api/recetas', requiereSesion, escrituraSoloRoles('cocinero'), recetasRoutes);
+app.use('/api/contabilidad', contabilidadRoutes);
 
 // ---- Middleware de errores: cualquier fallo en una ruta cae aquí ----
 // Devuelve un JSON claro con 500 en vez de tumbar el servidor.
@@ -160,3 +162,4 @@ if (ejecutadoDirecto) {
       process.exit(1);
     });
 }
+

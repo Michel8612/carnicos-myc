@@ -6,7 +6,7 @@
   <title>Ventas - Cárnicos M&C</title>
   <link rel="stylesheet" href="css/ventas.css">
   <style>
-    .top-nav { display:flex; gap:10px; justify-content:center; margin-bottom:6px; }
+    .top-nav { display:flex; gap:10px; justify-content:center; margin-bottom:6px; flex-wrap:wrap; }
     .top-nav a { color:#fff; text-decoration:none; font-size:14px; background:rgba(255,255,255,.18); padding:6px 12px; border-radius:6px; }
     .barra-info { display:flex; flex-wrap:wrap; gap:10px 18px; align-items:center; justify-content:center; margin:14px 0; font-size:15px; color:#333; }
     .barra-info b { color:#1976D2; }
@@ -14,29 +14,38 @@
     .acciones-top { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin:10px 0; }
     .btn-add-prod { background:#2196F3; color:#fff; border:none; padding:11px 18px; border-radius:8px; font-size:15px; cursor:pointer; }
     .btn-reiniciar { background:#e65100; color:#fff; border:none; padding:11px 18px; border-radius:8px; font-size:15px; cursor:pointer; }
-    .cuadre { text-align:center; background:#e8f5e9; border:1px solid #c8e6c9; border-radius:12px; padding:16px; margin:14px auto; max-width:520px; }
-    .cuadre .n { font-size:30px; font-weight:bold; color:#2e7d32; }
-    .cuadre .l { font-size:13px; color:#555; }
-    table.hoja { width:100%; border-collapse:collapse; margin-top:10px; background:#fff; border-radius:10px; overflow:hidden; box-shadow:0 4px 12px rgba(0,0,0,.12); }
-    table.hoja th { background:#bbdefb; padding:10px; font-size:13px; }
-    table.hoja td { border-top:1px solid #e0e0e0; padding:10px; text-align:center; font-size:14px; }
-    table.hoja input.vendido { width:90px; padding:7px; border:1px solid #90caf9; border-radius:6px; text-align:center; font-size:15px; }
-    .btn-x { background:#ef5350; color:#fff; border:none; border-radius:6px; width:34px; height:34px; cursor:pointer; font-size:16px; }
+    /* Tarjetas de totales */
+    .tarjetas { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin:16px 0; }
+    .tarjeta { background:#fff; border-radius:12px; padding:14px; text-align:center; box-shadow:0 3px 10px rgba(0,0,0,.12); }
+    .tarjeta .n { font-size:23px; font-weight:bold; }
+    .tarjeta .l { font-size:12px; color:#666; margin-top:3px; }
+    .t-venta .n { color:#1976D2; } .t-costo .n { color:#c62828; }
+    .t-ganancia .n { color:#2e7d32; } .t-exist .n { color:#6a1b9a; }
+    /* Tabla */
+    .tabla-scroll { overflow-x:auto; }
+    table.hoja { width:100%; border-collapse:collapse; margin-top:10px; background:#fff; border-radius:10px; overflow:hidden; box-shadow:0 4px 12px rgba(0,0,0,.12); min-width:780px; }
+    table.hoja th { background:#bbdefb; padding:10px 8px; font-size:12.5px; }
+    table.hoja td { border-top:1px solid #e0e0e0; padding:8px; text-align:center; font-size:14px; }
+    table.hoja input { width:82px; padding:6px; border:1px solid #cfd8dc; border-radius:6px; text-align:center; font-size:14px; }
+    table.hoja input.vendido { border-color:#2196F3; font-weight:bold; background:#e3f2fd; }
+    table.hoja input.nombre { width:130px; text-align:left; }
+    .g-pos { color:#2e7d32; font-weight:bold; } .g-neg { color:#c62828; font-weight:bold; }
+    .btn-x { background:#ef5350; color:#fff; border:none; border-radius:6px; width:32px; height:32px; cursor:pointer; font-size:15px; }
     .btn-x:hover { background:#c62828; }
-    .aviso-vta { max-width:560px; margin:20px auto; padding:14px; border-radius:10px; background:#fff3e0; border:1px solid #ffe0b2; color:#e65100; text-align:center; }
+    .fila-cero { background:#fff8e1; }
     .vacio-vta { text-align:center; color:#777; margin:20px; }
-    /* Popup agregar producto */
+    .ayuda { text-align:center; font-size:12.5px; color:#777; margin:8px 0 0; }
+    /* Popup */
     .modal-fondo { position:fixed; inset:0; background:rgba(0,0,0,.45); display:none; align-items:center; justify-content:center; padding:16px; z-index:50; }
     .modal-fondo.abierto { display:flex; }
-    .modal-caja { background:#fff; border-radius:14px; padding:22px; width:100%; max-width:440px; box-shadow:0 10px 30px rgba(0,0,0,.3); text-align:left; }
+    .modal-caja { background:#fff; border-radius:14px; padding:22px; width:100%; max-width:440px; box-shadow:0 10px 30px rgba(0,0,0,.3); text-align:left; max-height:92vh; overflow:auto; }
     .modal-caja h2 { color:#1976D2; margin:0 0 14px; }
     .modal-caja label { display:block; font-size:13px; font-weight:bold; color:#333; margin:8px 0 4px; }
     .modal-caja input, .modal-caja select { width:100%; padding:10px; border:1px solid #ccc; border-radius:8px; font-size:15px; }
     .fila2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
     .modal-acc { display:flex; gap:10px; margin-top:16px; }
     .modal-acc button { flex:1; padding:12px; border:none; border-radius:8px; cursor:pointer; font-size:15px; }
-    .b-cancelar { background:#e0e0e0; color:#333; }
-    .b-guardar { background:#2196F3; color:#fff; }
+    .b-cancelar { background:#e0e0e0; color:#333; } .b-guardar { background:#2196F3; color:#fff; }
     .modal-err { color:#d32f2f; background:#ffebee; border:1px solid #ffcdd2; border-radius:6px; padding:8px; margin-top:10px; font-size:14px; display:none; }
   </style>
 </head>
@@ -44,7 +53,7 @@
 <body class="ventas-body">
   <header>
     <img src="img/logo.png" alt="Cárnicos M&C" class="logo-ventas">
-    <h1>Ventas del Día</h1>
+    <h1>Área de Ventas</h1>
     <div class="top-nav">
       <a href="#" id="navPanel" style="display:none;">← Panel</a>
       <a href="#" onclick="logout();return false;">Salir</a>
@@ -53,9 +62,11 @@
 
   <main class="ventas-container">
     <div class="barra-info">
-      <span>Almacén: <b id="almacenNombre">—</b></span>
+      <span>Vendedor: <b id="vendedorNombre">—</b></span>
       <span>Fecha: <b id="fechaHoy">—</b></span>
-      <span id="selectorAlmacenBox" style="display:none;">Ver almacén: <select id="selectorAlmacen"></select></span>
+      <span id="selectorVendedorBox" style="display:none;">
+        Ver hoja de: <select id="selectorVendedor"></select>
+      </span>
     </div>
 
     <div class="acciones-top">
@@ -63,32 +74,35 @@
       <button class="btn-reiniciar" id="btnReiniciar">Reiniciar jornada</button>
     </div>
 
-    <div class="cuadre">
-      <div class="n" id="cuadreTotal">0.00</div>
-      <div class="l">Total del día (cuadre de la venta)</div>
+    <div class="tarjetas">
+      <div class="tarjeta t-venta"><div class="n" id="tVenta">0.00</div><div class="l">Venta del día</div></div>
+      <div class="tarjeta t-costo"><div class="n" id="tCosto">0.00</div><div class="l">Costo de lo vendido</div></div>
+      <div class="tarjeta t-ganancia"><div class="n" id="tGanancia">0.00</div><div class="l">Ganancia del día</div></div>
+      <div class="tarjeta t-exist"><div class="n" id="tExist">0.00</div><div class="l">Valor de la existencia</div></div>
     </div>
 
-    <div id="avisoAlmacen" class="aviso-vta" style="display:none;">
-      Este usuario no tiene un almacén asignado. Pídale al Dueño que se lo asigne en “Usuarios”.
+    <div class="tabla-scroll">
+      <table class="hoja" id="tablaHoja" style="display:none;">
+        <thead>
+          <tr>
+            <th>Producto</th>
+            <th>Cantidad</th>
+            <th>Unidad</th>
+            <th>Costo unit.</th>
+            <th>Precio venta</th>
+            <th>Vendido</th>
+            <th>Total</th>
+            <th>Ganancia</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="hojaBody"></tbody>
+      </table>
     </div>
-
-    <table class="hoja" id="tablaHoja" style="display:none;">
-      <thead>
-        <tr>
-          <th>Producto</th>
-          <th>Cantidad</th>
-          <th>Unidad</th>
-          <th>Precio venta</th>
-          <th>Vendido</th>
-          <th>Total</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody id="hojaBody"></tbody>
-    </table>
+    <p class="ayuda">Los datos se guardan solos al salir de cada casilla. “Reiniciar jornada” descuenta lo vendido de la cantidad y lo envía a Contabilidad.</p>
 
     <div id="vacioHoja" class="vacio-vta" style="display:none;">
-      No hay productos en este almacén. Use “+ Agregar producto” o espere a que el Cocinero produzca.
+      Todavía no tiene productos. Use “+ Agregar producto” para armar su lista de venta.
     </div>
   </main>
 
@@ -100,16 +114,31 @@
       <input type="text" id="mpNombre" placeholder="Ej. Chorizo, Jamón, Refresco…">
       <div class="fila2">
         <div>
-          <label>Cantidad (existencia)</label>
+          <label>Cantidad</label>
           <input type="number" id="mpCantidad" inputmode="decimal" placeholder="0">
         </div>
         <div>
           <label>Unidad</label>
-          <select id="mpUnidad"></select>
+          <select id="mpUnidad">
+            <option value="u">Unidad (u)</option>
+            <option value="lb">Libra (lb)</option>
+            <option value="kg">Kilogramo (kg)</option>
+            <option value="g">Gramo (g)</option>
+            <option value="L">Litro (L)</option>
+            <option value="caja">Caja</option>
+          </select>
         </div>
       </div>
-      <label>Precio de venta</label>
-      <input type="number" id="mpPrecio" inputmode="decimal" placeholder="0">
+      <div class="fila2">
+        <div>
+          <label>Costo por unidad</label>
+          <input type="number" id="mpCosto" inputmode="decimal" placeholder="0">
+        </div>
+        <div>
+          <label>Precio de venta</label>
+          <input type="number" id="mpPrecio" inputmode="decimal" placeholder="0">
+        </div>
+      </div>
       <p class="modal-err" id="mpError"></p>
       <div class="modal-acc">
         <button class="b-cancelar" id="mpCancelar">Cancelar</button>

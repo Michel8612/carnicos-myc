@@ -9,6 +9,7 @@
 import { Router } from 'express';
 import db from '../db/index.js';
 import { requiereSesion } from '../middleware/auth.js';
+import { anotar } from '../libro.js';
 
 const router = Router();
 router.use(requiereSesion);
@@ -166,6 +167,39 @@ router.post('/movimientos', async (req, res) => {
 
   try {
     await tx();
+
+    // Dejar constancia en el libro de contabilidad: el contador debe ver
+    // CUALQUIER movimiento económico, venga del área que venga.
+    const info = await db.prepare(`
+      SELECT p.nombre, COALESCE(p.precio_costo,0) AS costo, COALESCE(u.abreviatura,'') AS unidad,
+             a.nombre AS almacen
+      FROM productos p
+      LEFT JOIN unidades u ON u.id = p.unidad_id
+      LEFT JOIN almacenes a ON a.id = ?
+      WHERE p.id = ?
+    `).get(almacen_id, producto_id);
+    if (info) {
+      const valor = Number((cant * info.costo).toFixed(2));
+      await anotar({
+        tipo: 'almacen',
+        concepto: `${tipo === 'entrada' ? 'Entrada' : tipo === 'salida' ? 'Salida' : 'Ajuste'} de almacén — ${info.nombre}`,
+        producto: info.nombre,
+        cantidad: cant,
+        unidad: info.unidad,
+        // Mover mercancía NO es ganancia ni pérdida: una entrada es cambiar
+        // dinero por inventario (una inversión) y una salida es sacarlo del
+        // estante. Por eso se guarda su VALOR como referencia, pero no suma
+        // ni resta en el resultado del negocio: eso lo hacen las ventas
+        // (ingreso) y los gastos.
+        costo: 0,
+        ingreso: 0,
+        valor,
+        area: 'almacen',
+        usuario: req.usuario,
+        nota: [info.almacen, nota].filter(Boolean).join(' · ') || null,
+      });
+    }
+
     res.json({ ok: true });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -183,3 +217,4 @@ router.get('/unidades', async (req, res) => {
 });
 
 export default router;
+

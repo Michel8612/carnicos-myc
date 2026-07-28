@@ -299,6 +299,46 @@ CREATE TABLE IF NOT EXISTS config_negocio (
 INSERT INTO config_negocio (id, nombre) VALUES (1, 'Mi Negocio')
   ON CONFLICT (id) DO NOTHING;
 
+-- ---------- INVENTARIO PROPIO DEL PUNTO DE VENTA ----------
+-- El área de ventas NO depende del almacén: son cosas distintas. Cada
+-- vendedor lleva su propia lista de productos (los agrega él), con su
+-- costo y su precio de venta. Lo vendido se anota durante el día y se
+-- descuenta al cerrar la jornada.
+CREATE TABLE IF NOT EXISTS venta_inventario (
+  id             SERIAL PRIMARY KEY,
+  usuario_id     INTEGER NOT NULL REFERENCES usuarios(id),  -- de quién es la hoja
+  nombre         TEXT NOT NULL,
+  unidad         TEXT DEFAULT 'u',            -- lb, kg, g, u...
+  cantidad       DOUBLE PRECISION NOT NULL DEFAULT 0,   -- existencia
+  costo_unitario DOUBLE PRECISION NOT NULL DEFAULT 0,   -- lo que le costó
+  precio_venta   DOUBLE PRECISION NOT NULL DEFAULT 0,   -- a cómo lo vende
+  vendido        DOUBLE PRECISION NOT NULL DEFAULT 0,   -- vendido en la jornada
+  creado         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ---------- LIBRO DE CONTABILIDAD ----------
+-- Todo hecho económico queda aquí con su fecha y hora: ventas del día,
+-- entradas y salidas del almacén, producciones y gastos. Se conserva por
+-- tiempo indefinido hasta que el contador (o el dueño) decida borrarlo.
+CREATE TABLE IF NOT EXISTS contabilidad_registros (
+  id          SERIAL PRIMARY KEY,
+  fecha       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  tipo        TEXT NOT NULL,        -- venta | almacen | produccion | gasto
+  concepto    TEXT NOT NULL,        -- descripción legible
+  producto    TEXT,                 -- a qué producto se refiere
+  cantidad    DOUBLE PRECISION DEFAULT 0,
+  unidad      TEXT,
+  costo       DOUBLE PRECISION DEFAULT 0,   -- lo que costó (afecta el resultado)
+  ingreso     DOUBLE PRECISION DEFAULT 0,   -- lo que entró de dinero
+  ganancia    DOUBLE PRECISION DEFAULT 0,   -- ingreso - costo
+  valor       DOUBLE PRECISION DEFAULT 0,   -- valor de referencia (mercancía movida)
+  area        TEXT,                 -- ventas | almacen | cocina
+  usuario_id  INTEGER REFERENCES usuarios(id),
+  usuario_nombre TEXT,              -- se guarda el nombre por si el usuario se borra
+  nota        TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_contab_fecha ON contabilidad_registros (fecha DESC);
+
 -- ---------- JORNADA DE VENTAS (IPV editable del día por almacén) ----------
 -- Guarda cuánto se ha "vendido" hoy de cada producto en cada almacén.
 -- No toca la existencia hasta que se pulsa "Reiniciar jornada", que resta
