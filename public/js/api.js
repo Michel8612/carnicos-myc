@@ -157,6 +157,11 @@ const API = {
   usuarioEliminar: (id, borrarArea) =>
     apiFetch(`/usuarios/${id}`, { method: 'DELETE', body: JSON.stringify({ borrar_area: !!borrarArea }) }),
 
+  // --- Cálculos guardados (historial del área de recetas) ---
+  calculoGuardar: (d) => apiFetch('/recetas/calculos', { method: 'POST', body: JSON.stringify(d) }),
+  calculosHistorial: () => apiFetch('/recetas/calculos'),
+  calculoBorrar: (id) => apiFetch(`/recetas/calculos/${id}`, { method: 'DELETE' }),
+
   // Crear un componente desde el área de recetas (sin depender del almacén)
   recetaComponenteNuevo: (d) => apiFetch('/recetas/componente', { method: 'POST', body: JSON.stringify(d) }),
 

@@ -21,6 +21,24 @@
     .btn-producir { padding:14px 28px; background:#2e7d32; color:#fff; border:none; border-radius:8px; font-size:16px; cursor:pointer; }
     .btn-producir:hover { background:#1b5e20; }
     .costo-unit { font-size:14px; color:#555; text-align:right; margin-top:4px; }
+    /* Guardar cálculo e historial */
+    .btn-guardar-calc { padding:14px 24px; background:#6a1b9a; color:#fff; border:none;
+      border-radius:8px; font-size:16px; cursor:pointer; margin-left:10px; }
+    .btn-guardar-calc:hover { background:#4a148c; }
+    .calc-card { background:#fff; border-radius:12px; padding:14px 16px; margin-bottom:12px;
+      box-shadow:0 3px 10px rgba(0,0,0,.12); text-align:left; }
+    .calc-cab { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap; }
+    .calc-titulo { font-size:16px; font-weight:bold; color:#1976D2; }
+    .calc-fecha { font-size:12.5px; color:#777; }
+    .calc-datos { margin-top:6px; font-size:14px; color:#333; }
+    .calc-datos b { color:#2e7d32; }
+    .calc-chips { margin-top:8px; }
+    .calc-chip { display:inline-block; background:#ede7f6; color:#4a148c; border-radius:12px;
+      padding:3px 10px; margin:3px 4px 0 0; font-size:12.5px; }
+    .btn-borrar-calc { background:#ef5350; color:#fff; border:none; border-radius:6px;
+      padding:6px 12px; cursor:pointer; font-size:13px; }
+    .btn-borrar-calc:hover { background:#c62828; }
+    .hist-vacio { text-align:center; color:#777; padding:22px; }
   </style>
 </head>
 
@@ -31,6 +49,7 @@
     <div class="top-nav">
       <a href="#" id="navPanel" style="display:none;">← Panel</a>
       <a href="recetas.html">Recetas</a>
+      <a href="#" id="btnHistorial">📋 Historial</a>
       <a href="#" onclick="logout();return false;">Salir</a>
     </div>
   </header>
@@ -82,15 +101,26 @@
 
       <div class="acciones-prod">
         <button class="btn-producir" id="btnProducir">Registrar producción</button>
+        <button class="btn-guardar-calc" id="btnGuardarCalculo">💾 Guardar este cálculo</button>
       </div>
       <p style="font-size:12.5px;color:#666;margin:6px 0 0;text-align:center;">
         Queda en el historial de cocina con su costo. No modifica el almacén (son contabilidades separadas).
       </p>
       <div id="avisoResultado" class="aviso verde" style="display:none;"></div>
     </div>
+
+    <!-- HISTORIAL de cálculos guardados -->
+    <div id="panelHistorial" class="hidden">
+      <h2>Historial de cálculos</h2>
+      <p style="font-size:13px;color:#666;margin:2px 0 12px;">
+        Los cálculos que usted guardó, con su fecha y hora. Se conservan hasta que los borre.
+      </p>
+      <div id="listaHistorial"></div>
+    </div>
   </main>
 
   <script src="js/api.js"></script>
+  <script src="js/sonidos.js"></script>
   <script src="js/calculos.js"></script>
 </body>
 </html>

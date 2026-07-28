@@ -35,6 +35,11 @@ const cajaResultado = document.getElementById('resultadoCalculos');
 const tabla = document.getElementById('tablaCalculos');
 const avisoFalta = document.getElementById('avisoFalta');
 const avisoResultado = document.getElementById('avisoResultado');
+const panelHistorial = document.getElementById('panelHistorial');
+const listaHistorial = document.getElementById('listaHistorial');
+
+// Último cálculo hecho en pantalla, por si se quiere guardar.
+let ULTIMO_CALCULO = null;
 
 const fmt = (n) => Number(n ?? 0).toLocaleString('es-CU', { maximumFractionDigits: 3 });
 const money = (n) => Number(n ?? 0).toLocaleString('es-CU', { maximumFractionDigits: 2 });
@@ -118,7 +123,24 @@ async function calcular() {
   if (avisos.length) { avisoFalta.style.display = 'block'; avisoFalta.textContent = avisos.join(' '); }
   else { avisoFalta.style.display = 'none'; }
 
+  // Se recuerda el último cálculo por si el usuario quiere guardarlo.
+  ULTIMO_CALCULO = {
+    receta_id: r.id,
+    receta_nombre: r.nombre,
+    cantidad_final: Number(inpCantidad.value) || previa.rinde,
+    unidad: unidadDeReceta(),
+    costo_total: previa.costo_total,
+    costo_unitario: Number(porUnidad.toFixed(4)),
+    almacen_id: Number(almacenId),
+    almacen_nombre: (ALMACENES.find((a) => String(a.id) === String(almacenId)) || {}).nombre || '',
+    detalle: previa.ingredientes.map((ing) => ({
+      producto: ing.producto, necesita: ing.necesita, unidad: ing.unidad || '',
+      disponible: ing.disponible, costo: ing.costo,
+    })),
+  };
+
   cajaResultado.classList.remove('hidden');
+  panelHistorial.classList.add('hidden');   // al calcular se vuelve al cálculo
 }
 
 async function producir() {
@@ -149,9 +171,92 @@ async function producir() {
   }
 }
 
+// ============================================================
+//  GUARDAR EL CÁLCULO E HISTORIAL
+//
+//  El cálculo no se pierde: se guarda con su fecha y hora y se
+//  conserva hasta que el usuario decida borrarlo desde aquí.
+// ============================================================
+
+async function guardarCalculo() {
+  if (!ULTIMO_CALCULO) { alert('Primero haga un cálculo.'); return; }
+  const btn = document.getElementById('btnGuardarCalculo');
+  btn.disabled = true; btn.textContent = 'Guardando…';
+  try {
+    const nota = prompt('¿Quiere ponerle una nota a este cálculo? (opcional)', '') || null;
+    await API.calculoGuardar({ ...ULTIMO_CALCULO, nota });
+    avisoResultado.style.display = 'block';
+    avisoResultado.textContent = '✓ Cálculo guardado. Lo puede ver cuando quiera en “Historial”.';
+  } catch (e) {
+    alert('No se pudo guardar: ' + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = '💾 Guardar este cálculo';
+  }
+}
+
+const fechaHora = (f) => {
+  if (!f) return '';
+  const d = new Date(f);
+  return d.toLocaleDateString('es-CU', { day: '2-digit', month: '2-digit', year: 'numeric' }) +
+    ' · ' + d.toLocaleTimeString('es-CU', { hour: '2-digit', minute: '2-digit' });
+};
+const esc = (t) => String(t ?? '').replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+
+async function cargarHistorial() {
+  let filas = [];
+  try { filas = await API.calculosHistorial(); }
+  catch (e) { listaHistorial.innerHTML = `<p class="hist-vacio">No se pudo cargar: ${esc(e.message)}</p>`; return; }
+
+  if (!filas.length) {
+    listaHistorial.innerHTML = '<p class="hist-vacio">Todavía no ha guardado ningún cálculo. Haga uno y pulse “Guardar este cálculo”.</p>';
+    return;
+  }
+
+  listaHistorial.innerHTML = filas.map((f) => `
+    <div class="calc-card">
+      <div class="calc-cab">
+        <div>
+          <div class="calc-titulo">${esc(f.receta_nombre)} — ${fmt(f.cantidad_final)} ${esc(f.unidad || '')}</div>
+          <div class="calc-fecha">${fechaHora(f.fecha)}${f.usuario_nombre ? ' · ' + esc(f.usuario_nombre) : ''}${f.almacen_nombre ? ' · ' + esc(f.almacen_nombre) : ''}</div>
+        </div>
+        <button class="btn-borrar-calc" data-id="${f.id}">Eliminar</button>
+      </div>
+      <div class="calc-datos">
+        Costo total: <b>${money(f.costo_total)}</b> ·
+        Costo por ${esc(f.unidad || 'unidad')}: <b>${money(f.costo_unitario)}</b>
+      </div>
+      ${f.nota ? `<div class="calc-fecha" style="margin-top:4px;">Nota: ${esc(f.nota)}</div>` : ''}
+      <div class="calc-chips">
+        ${(f.detalle || []).map((d) => `<span class="calc-chip">${esc(d.producto)}: ${fmt(d.necesita)} ${esc(d.unidad || '')}</span>`).join('')}
+      </div>
+    </div>`).join('');
+
+  listaHistorial.querySelectorAll('.btn-borrar-calc').forEach((b) => {
+    b.addEventListener('click', async () => {
+      if (!confirm('¿Eliminar este cálculo del historial? No se puede deshacer.')) return;
+      try { await API.calculoBorrar(Number(b.dataset.id)); await cargarHistorial(); }
+      catch (e) { alert(e.message); }
+    });
+  });
+}
+
+function alternarHistorial(e) {
+  if (e) e.preventDefault();
+  const oculto = panelHistorial.classList.contains('hidden');
+  if (oculto) {
+    panelHistorial.classList.remove('hidden');
+    cajaResultado.classList.add('hidden');
+    cargarHistorial();
+  } else {
+    panelHistorial.classList.add('hidden');
+  }
+}
+
 // Eventos
 selReceta.addEventListener('change', () => { actualizarUnidad(); cajaResultado.classList.add('hidden'); });
 document.getElementById('btnCalcular').addEventListener('click', calcular);
 document.getElementById('btnProducir').addEventListener('click', producir);
+document.getElementById('btnGuardarCalculo').addEventListener('click', guardarCalculo);
+document.getElementById('btnHistorial').addEventListener('click', alternarHistorial);
 
 cargar();

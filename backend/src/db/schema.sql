@@ -336,6 +336,29 @@ CREATE TABLE IF NOT EXISTS venta_inventario (
   creado         TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- ---------- CÁLCULOS DE RECETAS GUARDADOS ----------
+-- Cada cálculo que el cocinero decide guardar queda aquí con su fecha y
+-- hora, y se conserva hasta que él mismo lo borre. El detalle (qué
+-- componente, cuánto hacía falta y cuánto costaba) se guarda en JSON para
+-- que el historial muestre el cálculo tal como se hizo ese día.
+CREATE TABLE IF NOT EXISTS calculos_guardados (
+  id             SERIAL PRIMARY KEY,
+  fecha          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  receta_id      INTEGER REFERENCES recetas(id) ON DELETE SET NULL,
+  receta_nombre  TEXT NOT NULL,
+  cantidad_final DOUBLE PRECISION NOT NULL DEFAULT 0,
+  unidad         TEXT,
+  costo_total    DOUBLE PRECISION NOT NULL DEFAULT 0,
+  costo_unitario DOUBLE PRECISION NOT NULL DEFAULT 0,
+  almacen_id     INTEGER REFERENCES almacenes(id) ON DELETE SET NULL,
+  almacen_nombre TEXT,
+  detalle        TEXT,                -- JSON con las líneas del cálculo
+  usuario_id     INTEGER REFERENCES usuarios(id),
+  usuario_nombre TEXT,
+  nota           TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_calculos_fecha ON calculos_guardados (fecha DESC);
+
 -- ---------- LIBRO DE CONTABILIDAD ----------
 -- Todo hecho económico queda aquí con su fecha y hora: ventas del día,
 -- entradas y salidas del almacén, producciones y gastos. Se conserva por

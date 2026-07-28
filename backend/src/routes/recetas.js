@@ -56,19 +56,39 @@ router.get('/', async (req, res) => {
   res.json(recetas);
 });
 
+// Nombres largos de las unidades que se ofrecen en las pantallas, para
+// que al crearlas queden bien escritas en el catálogo.
+const NOMBRE_UNIDAD = {
+  lb: 'Libra', kg: 'Kilogramo', g: 'Gramo', u: 'Unidad', L: 'Litro',
+  ml: 'Mililitro', caja: 'Caja', paq: 'Paquete', bandeja: 'Bandeja',
+  saco: 'Saco', gal: 'Galón', cont: 'Contenedor',
+};
+
+// Busca una unidad por su abreviatura y, si no está en el catálogo, la
+// crea. Así se pueden usar unidades nuevas (paquete, bandeja, saco…) sin
+// que el producto se quede sin unidad.
+async function resolverUnidad(abreviatura) {
+  const abrev = (abreviatura || 'lb').trim();
+  const existe = await db.prepare('SELECT id FROM unidades WHERE abreviatura = ?').get(abrev);
+  if (existe) return existe.id;
+  const nueva = await db.prepare('INSERT INTO unidades (nombre, abreviatura) VALUES (?, ?)')
+    .run(NOMBRE_UNIDAD[abrev] || abrev, abrev);
+  return nueva.lastInsertRowid;
+}
+
 // El producto terminado de una receta es la PROPIA receta: se llama igual.
 // Esta función busca un producto "terminado" con ese nombre y, si no existe,
-// lo crea (con la unidad del rinde: lb/g/kg). Así el usuario NO tiene que
-// elegir el producto final: escribe el nombre de la receta y ya.
+// lo crea (con la unidad del rinde: lb, kg, u, L…). Así el usuario NO tiene
+// que elegir el producto final: escribe el nombre de la receta y ya.
 async function resolverProductoFinal(nombre, rindeUnidad) {
   const existente = await db.prepare(
     "SELECT id FROM productos WHERE lower(nombre) = lower(?) AND tipo = 'terminado' AND activo = 1"
   ).get(nombre);
   if (existente) return existente.id;
-  const uni = await db.prepare('SELECT id FROM unidades WHERE abreviatura = ?').get(rindeUnidad || 'lb');
+  const unidadId = await resolverUnidad(rindeUnidad);
   const nuevo = await db.prepare(
     'INSERT INTO productos (nombre, tipo, unidad_id) VALUES (?, ?, ?)'
-  ).run(nombre, 'terminado', uni ? uni.id : null);
+  ).run(nombre, 'terminado', unidadId);
   return nuevo.lastInsertRowid;
 }
 
@@ -94,10 +114,10 @@ router.post('/componente', async (req, res) => {
   ).get(limpio);
   if (existente) return res.json({ id: existente.id, nombre: existente.nombre, ya_existia: true });
 
-  const uni = await db.prepare('SELECT id FROM unidades WHERE abreviatura = ?').get(unidad || 'lb');
+  const unidadId = await resolverUnidad(unidad);
   const r = await db.prepare(
     'INSERT INTO productos (nombre, tipo, unidad_id, precio_costo) VALUES (?, ?, ?, ?)'
-  ).run(limpio, 'materia_prima', uni ? uni.id : null, Number(precio_costo) || 0);
+  ).run(limpio, 'materia_prima', unidadId, Number(precio_costo) || 0);
   res.json({ id: r.lastInsertRowid, nombre: limpio, ya_existia: false });
 });
 
@@ -466,6 +486,59 @@ router.post('/disponibles/:id/al-almacen', async (req, res) => {
     nota: almacen ? `Recibido en ${almacen.nombre}` : null,
   });
 
+  res.json({ ok: true });
+});
+
+// ============================================================
+//  CÁLCULOS GUARDADOS
+//
+//  El cocinero hace un cálculo y puede guardarlo. Queda con su
+//  fecha y hora, y NO se borra solo: se conserva hasta que él
+//  decida eliminarlo desde el botón de Historial.
+// ============================================================
+
+// Guardar un cálculo.
+router.post('/calculos', async (req, res) => {
+  const {
+    receta_id, receta_nombre, cantidad_final, unidad,
+    costo_total, costo_unitario, almacen_id, almacen_nombre, detalle, nota,
+  } = req.body;
+
+  if (!receta_nombre) return res.status(400).json({ error: 'Falta la receta del cálculo.' });
+
+  const r = await db.prepare(`
+    INSERT INTO calculos_guardados
+      (receta_id, receta_nombre, cantidad_final, unidad, costo_total, costo_unitario,
+       almacen_id, almacen_nombre, detalle, usuario_id, usuario_nombre, nota)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    receta_id || null, receta_nombre, Number(cantidad_final) || 0, unidad || '',
+    Number(costo_total) || 0, Number(costo_unitario) || 0,
+    almacen_id || null, almacen_nombre || null,
+    detalle ? JSON.stringify(detalle) : null,
+    req.usuario.id, req.usuario.nombre || req.usuario.usuario, nota || null
+  );
+  res.json({ ok: true, id: r.lastInsertRowid });
+});
+
+// Historial de cálculos guardados (los más recientes primero).
+router.get('/calculos', async (req, res) => {
+  const filas = await db.prepare(`
+    SELECT * FROM calculos_guardados
+    ORDER BY fecha DESC
+    LIMIT 300
+  `).all();
+  // El detalle viaja como JSON: se devuelve ya convertido.
+  res.json(filas.map((f) => {
+    let detalle = [];
+    try { detalle = f.detalle ? JSON.parse(f.detalle) : []; } catch { detalle = []; }
+    return { ...f, detalle };
+  }));
+});
+
+// Borrar un cálculo del historial (solo cuando el usuario lo decide).
+router.delete('/calculos/:id', async (req, res) => {
+  await db.prepare('DELETE FROM calculos_guardados WHERE id = ?').run(Number(req.params.id));
   res.json({ ok: true });
 });
 
