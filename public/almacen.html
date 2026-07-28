@@ -4,13 +4,18 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Almacén - Cárnicos M&C</title>
+  <link rel="stylesheet" href="css/style.css">
   <link rel="stylesheet" href="css/almacen.css">
 </head>
 
 <body class="almacen-body">
   <header>
-    <img src="img/logo.png" alt="Logo Empresa" class="logo-almacen">
+    <img src="img/logo.png" alt="Logo Empresa" class="logo-almacen logo-circulo">
     <h1>Gestión de Almacén - Cárnicos M&C</h1>
+    <div class="top-nav">
+      <a href="#" id="navPanel" style="display:none;">← Panel</a>
+      <a href="#" onclick="logout();return false;">Salir</a>
+    </div>
   </header>
 
   <main class="almacen-container">
@@ -65,9 +70,34 @@
         </select>
 
         <input type="number" step="0.01" id="movCantidad" placeholder="Cantidad" required>
+
+        <!-- A dónde va lo que sale. Es OPCIONAL: si no se pone nada, es una
+             salida simple (el dueño la pidió y ya). Si se elige otro almacén,
+             la mercancía se envía allí; si se escribe un lugar, queda anotado. -->
+        <div id="bloqueDestino" class="hidden">
+          <select id="movDestinoAlmacen">
+            <option value="">¿A dónde va? (opcional)</option>
+          </select>
+          <input type="text" id="movDestinoTexto" placeholder="…o escriba el lugar (opcional)">
+        </div>
+
         <input type="text" id="movNota" placeholder="Nota (opcional)">
         <button type="submit">Registrar Movimiento</button>
       </form>
+    </div>
+
+    <!-- Lo que la cocina produjo y espera entrada al almacén -->
+    <div id="bloqueProducido" class="hidden">
+      <h2>Producido en cocina (esperando entrada)</h2>
+      <p style="font-size:13px;color:#666;margin:4px 0 10px;">
+        Lo que el cocinero elaboró. No entra al almacén hasta que usted le dé entrada aquí.
+      </p>
+      <table>
+        <thead>
+          <tr><th>Producto</th><th>Cantidad</th><th>Unidad</th><th>Costo unit.</th><th>Fecha</th><th>Acción</th></tr>
+        </thead>
+        <tbody id="producidoList"></tbody>
+      </table>
     </div>
 
     <!-- Lista de productos en almacén -->

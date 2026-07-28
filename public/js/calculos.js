@@ -16,6 +16,12 @@
 // Solo el Cocinero (o el Dueño) calcula y produce.
 if (!soloRoles(['cocinero'])) { throw new Error('sin acceso'); }
 
+// El dueño ve el enlace para volver al panel; el cocinero no.
+if (esDueno()) {
+  const nav = document.getElementById('navPanel');
+  nav.style.display = ''; nav.href = 'admin.html';
+}
+
 let RECETAS = [];
 let ALMACENES = [];
 

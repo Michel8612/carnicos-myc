@@ -19,6 +19,15 @@ import { anotar } from '../libro.js';
 const router = Router();
 router.use(requiereSesion);
 
+// Quién puede crear/editar/borrar recetas y registrar producción (cocina).
+// El router se monta con permiso de escritura ampliado a 'almacen' (para
+// poder llamar /disponibles/:id/al-almacen más abajo), así que aquí se
+// filtra fino: esas rutas de cocina siguen siendo solo para cocinero/dueño.
+const ES_COCINA = (rol) => ['cocinero', 'dueno', 'admin', 'proveedor'].includes(rol);
+// Quién puede dar entrada al almacén de lo producido.
+const ES_ALMACEN_O_DUENO = (rol) =>
+  ['almacen', 'almacenero', 'dueno', 'admin', 'proveedor'].includes(rol);
+
 // ---------- LISTAR recetas (todas, o de un producto) ----------
 router.get('/', async (req, res) => {
   const productoId = req.query.producto_id ? Number(req.query.producto_id) : null;
@@ -63,8 +72,40 @@ async function resolverProductoFinal(nombre, rindeUnidad) {
   return nuevo.lastInsertRowid;
 }
 
+// ---------- CREAR UN COMPONENTE desde el área de recetas ----------
+// El cocinero necesita poder anotar lo que lleva una receta (azúcar, sal,
+// sal de nitro…) AUNQUE el almacenero todavía no lo haya registrado: las
+// recetas son del área de cocina y no dependen del almacén. Aquí se crea
+// el componente como materia prima, con existencia cero; cuando el
+// almacenero lo reciba, le dará entrada desde su área.
+router.post('/componente', async (req, res) => {
+  if (!ES_COCINA(req.usuario.rol)) {
+    return res.status(403).json({ error: 'Esta acción es solo para cocina.' });
+  }
+  const { nombre, unidad, precio_costo } = req.body;
+  if (!nombre || !String(nombre).trim()) {
+    return res.status(400).json({ error: 'Escriba el nombre del componente.' });
+  }
+  const limpio = String(nombre).trim();
+
+  // Si ya existe uno con ese nombre, se reutiliza (no se duplica).
+  const existente = await db.prepare(
+    'SELECT id, nombre FROM productos WHERE lower(nombre) = lower(?) AND activo = 1'
+  ).get(limpio);
+  if (existente) return res.json({ id: existente.id, nombre: existente.nombre, ya_existia: true });
+
+  const uni = await db.prepare('SELECT id FROM unidades WHERE abreviatura = ?').get(unidad || 'lb');
+  const r = await db.prepare(
+    'INSERT INTO productos (nombre, tipo, unidad_id, precio_costo) VALUES (?, ?, ?, ?)'
+  ).run(limpio, 'materia_prima', uni ? uni.id : null, Number(precio_costo) || 0);
+  res.json({ id: r.lastInsertRowid, nombre: limpio, ya_existia: false });
+});
+
 // ---------- CREAR receta ----------
 router.post('/', async (req, res) => {
+  if (!ES_COCINA(req.usuario.rol)) {
+    return res.status(403).json({ error: 'Esta acción es solo para cocina.' });
+  }
   let { producto_final_id, nombre, rinde_cantidad, rinde_unidad, ingredientes } = req.body;
   if (!nombre) {
     return res.status(400).json({ error: 'Escriba el nombre de la receta.' });
@@ -92,6 +133,9 @@ router.post('/', async (req, res) => {
 
 // ---------- EDITAR receta ----------
 router.put('/:id', async (req, res) => {
+  if (!ES_COCINA(req.usuario.rol)) {
+    return res.status(403).json({ error: 'Esta acción es solo para cocina.' });
+  }
   const id = Number(req.params.id);
   const { nombre, rinde_cantidad, rinde_unidad, ingredientes } = req.body;
   const tx = db.transaction(async () => {
@@ -117,6 +161,9 @@ router.put('/:id', async (req, res) => {
 
 // ---------- ELIMINAR (desactivar) receta ----------
 router.delete('/:id', async (req, res) => {
+  if (!ES_COCINA(req.usuario.rol)) {
+    return res.status(403).json({ error: 'Esta acción es solo para cocina.' });
+  }
   await db.prepare('UPDATE recetas SET activa = 0 WHERE id = ?').run(Number(req.params.id));
   res.json({ ok: true });
 });
@@ -199,6 +246,9 @@ router.get('/:id/previa', async (req, res) => {
 // historial de cocina y en los reportes), pero NO se tocan las
 // existencias del almacén. El almacenero descarga su inventario aparte.
 router.post('/:id/producir', async (req, res) => {
+  if (!ES_COCINA(req.usuario.rol)) {
+    return res.status(403).json({ error: 'Esta acción es solo para cocina.' });
+  }
   const id = Number(req.params.id);
   const almacenId = req.body.almacen_id ? Number(req.body.almacen_id) : null;
   const nota = req.body.nota || null;
@@ -261,11 +311,21 @@ router.post('/:id/producir', async (req, res) => {
     }
 
     // 4) Actualizar el costo por unidad del producto terminado (ficha de costo)
+    let costoUnitFinal = 0;
     if (cantidadProducida > 0) {
-      const costoUnitFinal = Number((costoTotal / cantidadProducida).toFixed(4));
+      costoUnitFinal = Number((costoTotal / cantidadProducida).toFixed(4));
       await db.prepare('UPDATE productos SET precio_costo = ? WHERE id = ?')
         .run(costoUnitFinal, receta.producto_final_id);
     }
+
+    // 5) Dejarlo disponible para que el ALMACENERO le dé entrada cuando
+    //    corresponda. Producir NO mete esto al almacén todavía: es la
+    //    cocina, no el almacén (ver /disponibles/:id/al-almacen).
+    await db.prepare(`
+      INSERT INTO produccion_disponible
+        (produccion_id, producto_nombre, cantidad, unidad, costo_unitario, entregado)
+      VALUES (?, ?, ?, ?, ?, 0)
+    `).run(prodId, receta.nombre, cantidadProducida, receta.rinde_unidad, costoUnitFinal);
 
     return { prodId, costoTotal: Number(costoTotal.toFixed(2)) };
   });
@@ -300,6 +360,113 @@ router.post('/:id/producir', async (req, res) => {
     // Deja claro para quien consuma la API que el almacén no se movió.
     afecta_almacen: false,
   });
+});
+
+// ============================================================
+//  LO PRODUCIDO QUE AÚN NO ESTÁ EN EL ALMACÉN
+//
+//  El cocinero produce, pero eso NO entra solo al almacén: el
+//  almacenero (o el dueño) revisa esta lista y decide cuándo darle
+//  entrada. Así el almacén nunca se mueve sin que alguien de esa
+//  área lo confirme.
+// ============================================================
+
+// ---------- LISTAR lo pendiente de entrar al almacén ----------
+// Lo puede ver cualquiera con sesión (cocinero, almacenero, dueño...);
+// solo dar la entrada está restringido más abajo.
+router.get('/disponibles', async (req, res) => {
+  const filas = await db.prepare(`
+    SELECT pd.*, pr.almacen_id AS almacen_sugerido_id, a.nombre AS almacen_sugerido
+    FROM produccion_disponible pd
+    LEFT JOIN producciones pr ON pr.id = pd.produccion_id
+    LEFT JOIN almacenes a ON a.id = pr.almacen_id
+    WHERE pd.entregado = 0
+    ORDER BY pd.fecha DESC
+  `).all();
+  res.json(filas);
+});
+
+// ---------- DAR ENTRADA al almacén de lo producido ----------
+// Solo el almacenero (de su propio almacén) o el dueño. Busca o crea el
+// producto terminado por nombre, suma la cantidad a existencias del
+// almacén elegido, deja el movimiento de entrada y marca entregado=1.
+router.post('/disponibles/:id/al-almacen', async (req, res) => {
+  if (!ES_ALMACEN_O_DUENO(req.usuario.rol)) {
+    return res.status(403).json({ error: 'Solo el almacenero o el dueño pueden dar entrada al almacén.' });
+  }
+  const id = Number(req.params.id);
+  const almacenId = Number(req.body?.almacen_id);
+  if (!almacenId) return res.status(400).json({ error: 'Indique el almacén que recibe la producción.' });
+
+  // Un almacenero solo puede recibir en SU propio almacén.
+  if ((req.usuario.rol === 'almacen' || req.usuario.rol === 'almacenero') &&
+      almacenId !== Number(req.usuario.almacen_id)) {
+    return res.status(403).json({ error: 'Solo puede dar entrada en su propio almacén.' });
+  }
+
+  const disponible = await db.prepare('SELECT * FROM produccion_disponible WHERE id = ?').get(id);
+  if (!disponible) return res.status(404).json({ error: 'Ese producto ya no está disponible.' });
+  if (disponible.entregado) return res.status(400).json({ error: 'Esa producción ya se llevó al almacén.' });
+
+  const tx = db.transaction(async () => {
+    // Buscar (o crear) el producto terminado por su nombre.
+    const existente = await db.prepare(
+      "SELECT id FROM productos WHERE lower(nombre) = lower(?) AND tipo = 'terminado' AND activo = 1"
+    ).get(disponible.producto_nombre);
+
+    let productoId;
+    if (existente) {
+      productoId = existente.id;
+    } else {
+      const uni = await db.prepare('SELECT id FROM unidades WHERE abreviatura = ?').get(disponible.unidad || 'lb');
+      const nuevo = await db.prepare(
+        'INSERT INTO productos (nombre, tipo, unidad_id, precio_costo) VALUES (?, ?, ?, ?)'
+      ).run(disponible.producto_nombre, 'terminado', uni ? uni.id : null, disponible.costo_unitario || 0);
+      productoId = nuevo.lastInsertRowid;
+    }
+
+    // Sumar a existencias del almacén elegido.
+    const fila = await db.prepare(
+      'SELECT id, cantidad FROM existencias WHERE producto_id = ? AND almacen_id = ?'
+    ).get(productoId, almacenId);
+    if (fila) {
+      await db.prepare('UPDATE existencias SET cantidad = ? WHERE id = ?')
+        .run(Number((fila.cantidad + disponible.cantidad).toFixed(3)), fila.id);
+    } else {
+      await db.prepare('INSERT INTO existencias (producto_id, almacen_id, cantidad) VALUES (?, ?, ?)')
+        .run(productoId, almacenId, disponible.cantidad);
+    }
+
+    // Movimiento de entrada (el rastro del almacén).
+    await db.prepare(`
+      INSERT INTO movimientos (producto_id, almacen_id, tipo, cantidad, origen_tipo, origen_id, usuario_id, nota)
+      VALUES (?, ?, 'entrada', ?, 'produccion', ?, ?, 'Entrada de producción de cocina')
+    `).run(productoId, almacenId, disponible.cantidad, disponible.produccion_id, req.usuario.id);
+
+    // Marcar como entregado.
+    await db.prepare('UPDATE produccion_disponible SET entregado = 1 WHERE id = ?').run(id);
+
+    return productoId;
+  });
+
+  await tx();
+
+  const almacen = await db.prepare('SELECT nombre FROM almacenes WHERE id = ?').get(almacenId);
+  await anotar({
+    tipo: 'almacen',
+    concepto: `Entrada de producción — ${disponible.producto_nombre}`,
+    producto: disponible.producto_nombre,
+    cantidad: disponible.cantidad,
+    unidad: disponible.unidad,
+    costo: 0,
+    ingreso: 0,
+    valor: Number((disponible.cantidad * (disponible.costo_unitario || 0)).toFixed(2)),
+    area: 'almacen',
+    usuario: req.usuario,
+    nota: almacen ? `Recibido en ${almacen.nombre}` : null,
+  });
+
+  res.json({ ok: true });
 });
 
 // ---------- HISTORIAL de producciones ----------

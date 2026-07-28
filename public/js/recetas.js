@@ -10,6 +10,12 @@
 // Solo el Cocinero (o el Dueño) gestiona recetas.
 if (!soloRoles(['cocinero'])) { throw new Error('sin acceso'); }
 
+// El dueño ve el enlace para volver al panel; el cocinero no.
+if (esDueno()) {
+  const nav = document.getElementById('navPanel');
+  nav.style.display = ''; nav.href = 'admin.html';
+}
+
 // --- Estado ---
 let PRODUCTOS = [];      // todos los productos del almacén
 let TERMINADOS = [];     // tipo 'terminado'
@@ -98,9 +104,12 @@ function abrirModal(receta) {
   } else {
     filaComponente();
   }
+  // Ya no hace falta que el almacén tenga nada: con "+ Componente nuevo"
+  // el cocinero puede anotar lo que lleva la receta (azúcar, sal…) aunque
+  // el almacenero todavía no lo haya registrado.
   if (COMPONENTES.length === 0) {
     recError.style.display = 'block';
-    recError.textContent = 'Primero registre en el Almacén las materias primas que usa (azúcar, sal, etc.) con tipo "Materia prima".';
+    recError.textContent = 'Todavía no hay componentes. Use “+ Componente nuevo” para anotar los que lleva esta receta (azúcar, sal, sal de nitro…).';
   }
   modal.classList.add('abierto');
 }
@@ -168,6 +177,38 @@ document.getElementById('btnListaRecetas').addEventListener('click', () => {
 });
 nombreInput.addEventListener('input', actualizarEco);
 document.getElementById('btnAgregarComp').addEventListener('click', () => filaComponente());
+
+// ---- Crear un componente nuevo sin salir de Recetas ----
+// El cocinero anota lo que lleva la receta aunque el almacén esté vacío.
+const btnCompNuevo = document.getElementById('btnComponenteNuevo');
+if (btnCompNuevo) {
+  btnCompNuevo.addEventListener('click', async () => {
+    const nombre = prompt('Nombre del componente (ej. Azúcar, Sal común, Sal de nitro):', '');
+    if (!nombre || !nombre.trim()) return;
+    const unidad = prompt('Unidad (lb, kg, g, L, u):', 'lb') || 'lb';
+    const costo = prompt('¿Cuánto cuesta cada ' + unidad + '? (puede dejarlo en 0):', '0');
+    try {
+      const nuevo = await API.recetaComponenteNuevo({
+        nombre: nombre.trim(), unidad: unidad.trim(), precio_costo: Number(costo) || 0,
+      });
+      // Recargar la lista de componentes y dejarlo elegido en una fila nueva.
+      PRODUCTOS = await API.productos();
+      COMPONENTES = PRODUCTOS.filter((p) => p.tipo === 'materia_prima' || p.tipo === 'reventa');
+      recError.style.display = 'none';
+      // Rehacer los desplegables ya pintados para que incluyan el nuevo.
+      const filas = [...compBody.querySelectorAll('tr')].map((tr) => ({
+        pid: tr.querySelector('.c-prod').value,
+        cant: tr.querySelector('.c-cant').value,
+      }));
+      compBody.innerHTML = '';
+      filas.forEach((f) => filaComponente(f.pid || '', f.cant || ''));
+      filaComponente(nuevo.id, '');
+      if (nuevo.ya_existia) alert('Ese componente ya existía: se agregó a la receta.');
+    } catch (e) {
+      mostrarError(e.message);
+    }
+  });
+}
 document.getElementById('btnGuardar').addEventListener('click', guardar);
 document.getElementById('btnCancelar').addEventListener('click', cerrarModal);
 modal.addEventListener('click', (e) => { if (e.target === modal) cerrarModal(); });

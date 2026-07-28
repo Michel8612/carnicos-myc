@@ -25,11 +25,17 @@ CREATE TABLE IF NOT EXISTS unidades (
   abreviatura TEXT NOT NULL
 );
 
+-- OJO: "usuario_id" NO lleva REFERENCES aquí porque en este punto del
+-- script la tabla "usuarios" todavía no existe (se crea más abajo, y
+-- usuarios.almacen_id apunta a almacenes: son referencias cruzadas). La
+-- restricción de llave foránea real se agrega al final del archivo, en
+-- el bloque de migraciones, una vez que "usuarios" ya existe.
 CREATE TABLE IF NOT EXISTS almacenes (
   id          SERIAL PRIMARY KEY,
   nombre      TEXT NOT NULL,
   zona        TEXT NOT NULL,            -- seco | embutido | refrigerado
-  descripcion TEXT
+  descripcion TEXT,
+  usuario_id  INTEGER                   -- responsable de este almacén (ver usuarios)
 );
 
 CREATE TABLE IF NOT EXISTS productos (
@@ -291,6 +297,20 @@ CREATE TABLE IF NOT EXISTS produccion_consumo (
   costo          DOUBLE PRECISION DEFAULT 0
 );
 
+-- Lo que la cocina produjo y AÚN no se ha llevado al almacén. El
+-- almacenero (o el dueño) lo revisa y le da entrada cuando corresponda;
+-- hasta entonces no cuenta como existencia de ningún almacén.
+CREATE TABLE IF NOT EXISTS produccion_disponible (
+  id              SERIAL PRIMARY KEY,
+  produccion_id   INTEGER REFERENCES producciones(id),
+  producto_nombre TEXT NOT NULL,
+  cantidad        DOUBLE PRECISION NOT NULL,
+  unidad          TEXT,
+  costo_unitario  DOUBLE PRECISION DEFAULT 0,
+  fecha           TIMESTAMPTZ NOT NULL DEFAULT now(),
+  entregado       INTEGER NOT NULL DEFAULT 0   -- 0 = pendiente, 1 = ya entró al almacén
+);
+
 -- ---------- CONFIGURACIÓN DEL NEGOCIO ----------
 
 CREATE TABLE IF NOT EXISTS config_negocio (
@@ -363,6 +383,20 @@ CREATE TABLE IF NOT EXISTS licencia (
   id_instalacion TEXT NOT NULL,
   activada       INTEGER NOT NULL DEFAULT 0
 );
+
+-- ============================================================
+--  MIGRACIONES IDEMPOTENTES
+--  Para bases de datos que ya existían antes de este cambio:
+--  agregan columnas nuevas solo si todavía no están. Correr este
+--  archivo varias veces sigue siendo seguro.
+-- ============================================================
+
+-- Cada almacén puede tener un responsable (el almacenero dueño de esa
+-- área). En instalaciones nuevas la columna ya viene en el CREATE TABLE
+-- de más arriba (sin llave foránea, por el orden de creación); aquí se
+-- agrega para instalaciones viejas, ahora sí con su REFERENCES porque
+-- en este punto "usuarios" ya existe seguro.
+ALTER TABLE almacenes ADD COLUMN IF NOT EXISTS usuario_id INTEGER REFERENCES usuarios(id);
 `;
 
 export default SCHEMA_SQL;

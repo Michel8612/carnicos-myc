@@ -98,7 +98,11 @@ app.use('/api/ventas', requiereSesion, escrituraSoloRoles('ventas'), ventasRoute
 app.use('/api/transporte', requiereSesion, escrituraSoloRoles('ventas'), transporteRoutes);
 app.use('/api/costos', requiereSesion, escrituraSoloRoles(), costosRoutes); // solo dueño escribe; contabilidad solo lee
 app.use('/api/ipv', requiereSesion, escrituraSoloRoles('almacen', 'almacenero'), ipvRoutes);
-app.use('/api/recetas', requiereSesion, escrituraSoloRoles('cocinero'), recetasRoutes);
+// 'almacen' se incluye aquí porque el almacenero necesita poder llamar a
+// POST /recetas/disponibles/:id/al-almacen (dar entrada a lo producido);
+// el propio archivo recetas.js restringe fino las demás rutas de cocina
+// (crear/editar/borrar receta, producir) a cocinero/dueño solamente.
+app.use('/api/recetas', requiereSesion, escrituraSoloRoles('cocinero', 'almacen', 'almacenero'), recetasRoutes);
 app.use('/api/contabilidad', contabilidadRoutes);
 
 // ---- Middleware de errores: cualquier fallo en una ruta cae aquí ----

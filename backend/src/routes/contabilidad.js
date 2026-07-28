@@ -39,7 +39,7 @@ router.get('/resumen', async (req, res) => {
   // si se vendiera al precio de venta fijado.
   const almacen = await db.prepare(`
     SELECT p.id, p.nombre, p.tipo, COALESCE(u.abreviatura,'') AS unidad,
-           a.nombre AS almacen,
+           a.nombre AS almacen, resp.nombre AS responsable,
            COALESCE(e.cantidad,0)   AS cantidad,
            COALESCE(p.precio_costo,0) AS costo_unitario,
            COALESCE(p.precio_venta,0) AS precio_venta
@@ -47,6 +47,7 @@ router.get('/resumen', async (req, res) => {
     JOIN productos p  ON p.id = e.producto_id
     JOIN almacenes a  ON a.id = e.almacen_id
     LEFT JOIN unidades u ON u.id = p.unidad_id
+    LEFT JOIN usuarios resp ON resp.id = a.usuario_id
     WHERE p.activo = 1
     ORDER BY a.nombre, p.nombre
   `).all();

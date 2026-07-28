@@ -4,12 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Recetas - Cárnicos M&C</title>
+  <link rel="stylesheet" href="css/style.css">
   <link rel="stylesheet" href="css/recetas.css">
   <style>
-    /* Barra superior con navegación */
-    .top-nav { display:flex; gap:10px; justify-content:center; margin-bottom:6px; }
-    .top-nav a { color:#fff; text-decoration:none; font-size:14px; background:rgba(255,255,255,.18);
-      padding:6px 12px; border-radius:6px; }
     /* Popup (modal) */
     .modal-fondo { position:fixed; inset:0; background:rgba(0,0,0,.45); display:none;
       align-items:center; justify-content:center; padding:16px; z-index:50; }
@@ -49,10 +46,10 @@
 
 <body class="recetas-body">
   <header>
-    <img src="img/logo.png" alt="Cárnicos M&C" class="logo-recetas">
+    <img src="img/logo.png" alt="Cárnicos M&C" class="logo-recetas logo-circulo">
     <h1>Gestión de Recetas</h1>
     <div class="top-nav">
-      <a href="admin.html">← Panel</a>
+      <a href="#" id="navPanel" style="display:none;">← Panel</a>
       <a href="calculos.html">Calcular / Producir</a>
       <a href="#" onclick="logout();return false;">Salir</a>
     </div>
@@ -102,6 +99,12 @@
         <tbody id="compBody"></tbody>
       </table>
       <button type="button" class="btn-add" id="btnAgregarComp">+ Agregar componente</button>
+      <button type="button" class="btn-add" id="btnComponenteNuevo"
+              style="background:#6a1b9a;margin-left:6px;">+ Componente nuevo</button>
+      <p class="rec-sub" style="margin:6px 0 0;">
+        “Agregar componente” pone una línea para elegir uno ya registrado.
+        “Componente nuevo” crea uno que todavía no existe, sin salir de aquí.
+      </p>
 
       <p class="rec-err" id="recError"></p>
       <div class="modal-acc">

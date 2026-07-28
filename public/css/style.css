@@ -99,3 +99,44 @@ body {
     width: 100px;
   }
 }
+
+/* ============================================================
+   Barra de navegación superior (común a todas las páginas
+   internas): enlace "← Panel" (solo dueño) + "Salir", siempre
+   con el mismo aspecto para que no haya un estilo distinto
+   en cada página.
+   ============================================================ */
+.top-nav {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.top-nav a {
+  color: #fff;
+  text-decoration: none;
+  font-size: 14px;
+  background: rgba(255, 255, 255, .18);
+  padding: 6px 14px;
+  border-radius: 6px;
+  transition: background .2s ease;
+}
+
+.top-nav a:hover {
+  background: rgba(255, 255, 255, .32);
+}
+
+/* Círculo blanco detrás del logo: el logo trae fondo oscuro y
+   sobre cabeceras oscuras se ve como una mancha. Con este círculo
+   se distingue bien en cualquier página. */
+.logo-circulo {
+  display: block;
+  margin: 0 auto 10px auto;
+  background: #fff;
+  border-radius: 50%;
+  padding: 6px;
+  object-fit: contain;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .3);
+}

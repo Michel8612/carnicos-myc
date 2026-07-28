@@ -6,6 +6,12 @@ if (!soloRoles(['almacen', 'almacenero'])) {
   throw new Error('sin acceso');
 }
 
+// El dueño ve el enlace para volver al panel; los demás roles no.
+if (esDueno()) {
+  const nav = document.getElementById('navPanel');
+  nav.style.display = ''; nav.href = 'admin.html';
+}
+
 // Elementos del DOM
 const btnAgregarProducto = document.getElementById('btnAgregarProducto');
 const formProducto = document.getElementById('formProducto');
@@ -61,17 +67,37 @@ productoForm.addEventListener('submit', (e) => {
     });
 });
 
+// El destino solo tiene sentido cuando se da SALIDA: se muestra u oculta.
+const tipoMovSelect = document.getElementById('movTipo');
+const bloqueDestino = document.getElementById('bloqueDestino');
+if (tipoMovSelect && bloqueDestino) {
+  const refrescarDestino = () => {
+    bloqueDestino.classList.toggle('hidden', tipoMovSelect.value !== 'salida');
+  };
+  tipoMovSelect.addEventListener('change', refrescarDestino);
+  refrescarDestino();
+}
+
 // Registrar movimiento (entrada/salida)
 movimientoForm.addEventListener('submit', (e) => {
   e.preventDefault();
 
+  const tipo = document.getElementById('movTipo').value;
   const datos = {
     producto_id: Number(movProductoSelect.value),
     almacen_id: Number(movAlmacenSelect.value),
-    tipo: document.getElementById('movTipo').value,
+    tipo,
     cantidad: parseFloat(document.getElementById('movCantidad').value),
     nota: document.getElementById('movNota').value.trim() || undefined,
   };
+
+  // A dónde va lo que sale (opcional): otro almacén, o un lugar escrito.
+  if (tipo === 'salida') {
+    const destAlm = document.getElementById('movDestinoAlmacen');
+    const destTxt = document.getElementById('movDestinoTexto');
+    if (destAlm && destAlm.value) datos.destino_almacen_id = Number(destAlm.value);
+    if (destTxt && destTxt.value.trim()) datos.destino_texto = destTxt.value.trim();
+  }
 
   if (!datos.producto_id || !datos.almacen_id || !datos.cantidad) {
     alert('Complete producto, almacén y cantidad.');
@@ -81,6 +107,7 @@ movimientoForm.addEventListener('submit', (e) => {
   API.registrarMovimiento(datos)
     .then(() => {
       movimientoForm.reset();
+      if (bloqueDestino) bloqueDestino.classList.add('hidden');
       cargarTodo();
     })
     .catch((error) => {
@@ -88,6 +115,53 @@ movimientoForm.addEventListener('submit', (e) => {
       alert('Error: ' + error.message);
     });
 });
+
+// ============================================================
+//  Lo que la cocina produjo, esperando entrada al almacén
+//
+//  El cocinero elabora y eso NO entra solo al almacén: aparece
+//  aquí y el almacenero decide cuándo darle entrada.
+// ============================================================
+async function cargarProducido() {
+  const bloque = document.getElementById('bloqueProducido');
+  const cuerpo = document.getElementById('producidoList');
+  if (!bloque || !cuerpo) return;
+
+  let filas = [];
+  try { filas = await API.produccionDisponible(); } catch (e) { filas = []; }
+
+  if (!filas.length) { bloque.classList.add('hidden'); return; }
+  bloque.classList.remove('hidden');
+
+  const fecha = (f) => {
+    if (!f) return '';
+    const d = new Date(f);
+    return d.toLocaleDateString('es-CU', { day: '2-digit', month: '2-digit' }) + ' ' +
+      d.toLocaleTimeString('es-CU', { hour: '2-digit', minute: '2-digit' });
+  };
+
+  cuerpo.innerHTML = filas.map((f) => `
+    <tr>
+      <td><b>${f.producto_nombre}</b></td>
+      <td>${Number(f.cantidad).toLocaleString('es-CU', { maximumFractionDigits: 3 })}</td>
+      <td>${f.unidad || ''}</td>
+      <td>${Number(f.costo_unitario || 0).toLocaleString('es-CU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+      <td>${fecha(f.fecha)}</td>
+      <td><button onclick="darEntradaProducido(${f.id}, '${String(f.producto_nombre).replace(/'/g, "\\'")}')">Dar entrada</button></td>
+    </tr>`).join('');
+}
+
+async function darEntradaProducido(id, nombre) {
+  const almacenId = Number(movAlmacenSelect.value);
+  if (!almacenId) { alert('Elija primero el almacén en el formulario de arriba.'); return; }
+  if (!confirm(`¿Dar entrada de "${nombre}" al almacén?\n\nA partir de ahora contará como existencia.`)) return;
+  try {
+    await API.produccionAlAlmacen(id, almacenId);
+    await cargarTodo();
+  } catch (e) {
+    alert('No se pudo dar entrada: ' + e.message);
+  }
+}
 
 // Cargar unidades para los selects
 function cargarUnidades() {
@@ -100,11 +174,23 @@ function cargarUnidades() {
 
 // Cargar almacenes (para el selector de movimiento y el contador)
 function cargarAlmacenes() {
-  return API.almacenes().then((almacenes) => {
+  return API.almacenes().then(async (almacenes) => {
     movAlmacenSelect.innerHTML = (almacenes || [])
       .map((a) => `<option value="${a.id}">${a.nombre}</option>`)
       .join('');
     contadorAlmacenes.textContent = `${(almacenes || []).length} almacenes`;
+
+    // Para enviar mercancía a otro sitio hace falta ver TODOS los almacenes,
+    // no solo el propio (un almacenero solo ve el suyo en la lista de arriba).
+    const destino = document.getElementById('movDestinoAlmacen');
+    if (destino) {
+      let todos = almacenes || [];
+      try { todos = await API.almacenesTodos(); } catch (e) { /* se queda con los suyos */ }
+      const propio = Number(movAlmacenSelect.value);
+      destino.innerHTML = '<option value="">¿A dónde va? (opcional)</option>' +
+        todos.filter((a) => a.id !== propio)
+          .map((a) => `<option value="${a.id}">${a.nombre}</option>`).join('');
+    }
     return almacenes;
   }).catch((error) => console.error('Error al cargar almacenes:', error));
 }
@@ -168,6 +254,7 @@ function cargarTodo() {
   cargarExistencias();
   cargarProductosSelect();
   cargarAlmacenes();
+  cargarProducido();   // lo que la cocina dejó listo para entrar
 }
 
 // Carga inicial

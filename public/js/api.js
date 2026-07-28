@@ -150,6 +150,22 @@ const API = {
   ventaVendido: (id, vendido) => apiFetch(`/ventas/vendido/${id}`, { method: 'POST', body: JSON.stringify({ vendido }) }),
   ventasReiniciar: (d) => apiFetch('/ventas/reiniciar', { method: 'POST', body: JSON.stringify(d || {}) }),
 
+  // --- Usuarios: eliminar y reasignar su área ---
+  usuarioAreaInfo: (id) => apiFetch(`/usuarios/${id}/area-info`),
+  usuarioReasignarArea: (id, nuevoId) =>
+    apiFetch(`/usuarios/${id}/reasignar-area`, { method: 'POST', body: JSON.stringify({ nuevo_usuario_id: nuevoId }) }),
+  usuarioEliminar: (id, borrarArea) =>
+    apiFetch(`/usuarios/${id}`, { method: 'DELETE', body: JSON.stringify({ borrar_area: !!borrarArea }) }),
+
+  // Crear un componente desde el área de recetas (sin depender del almacén)
+  recetaComponenteNuevo: (d) => apiFetch('/recetas/componente', { method: 'POST', body: JSON.stringify(d) }),
+
+  // --- Lo producido en cocina, esperando entrada al almacén ---
+  produccionDisponible: () => apiFetch('/recetas/disponibles'),
+  produccionAlAlmacen: (id, almacenId) =>
+    apiFetch(`/recetas/disponibles/${id}/al-almacen`, { method: 'POST', body: JSON.stringify({ almacen_id: almacenId }) }),
+  almacenesTodos: () => apiFetch('/inventario/almacenes?todos=1'),
+
   // --- Contabilidad (lo ve todo) ---
   contabResumen: () => apiFetch('/contabilidad/resumen'),
   contabLibro: (f) => {

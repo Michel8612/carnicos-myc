@@ -6,67 +6,109 @@ body.admin-body {
   color: #000;
 }
 
-/* Header */
+/* Header (mismo tono oscuro que el resto de las páginas, para que
+   todas las cabeceras se vean parejas) */
 header {
   text-align: center;
-  padding: 20px;
-  background: #4CAF50;
+  padding: 18px 20px 20px;
+  background: #37474f;
   color: #fff;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.25);
 }
 
 .logo-admin {
-  width: 100px;
-  display: block;
-  margin: 0 auto 10px auto;
+  width: 90px;
+  height: 90px;
 }
 
-h1 {
+header h1 {
+  color: #fff;
   margin: 0;
   font-size: 24px;
+  letter-spacing: .3px;
 }
 
 /* Contenedor principal */
 .admin-container {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  padding: 30px;
-  gap: 20px;
-  max-width: 900px;
+  padding: 30px 20px 50px;
+  max-width: 1100px;
   margin: auto;
 }
 
-/* Botones principales */
-.admin-container button {
-  padding: 20px 30px;
-  background: #66bb6a;
-  color: #fff;
-  border: none;
-  border-radius: 50px;
-  font-size: 16px;
-  cursor: pointer;
-  transition: background 0.3s ease, transform 0.2s ease, box-shadow 0.3s ease;
-  min-width: 180px;
+/* Croquis visual del negocio: tarjetas grandes tipo mapa,
+   cada una lleva a su área con su propio color de identidad. */
+.croquis-intro {
   text-align: center;
-  box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+  color: #555;
+  margin: 0 0 20px;
+  font-size: 15px;
 }
 
-.admin-container button:hover {
-  background: #57a05c;
-  transform: scale(1.05);
-  box-shadow: 0 6px 14px rgba(0,0,0,0.15);
+.croquis-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 20px;
 }
 
-/* Responsive */
+.croquis-tarjeta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+  background: #fff;
+  border-radius: 16px;
+  padding: 28px 18px;
+  text-decoration: none;
+  color: #263238;
+  box-shadow: 0 4px 14px rgba(0,0,0,.14);
+  border-top: 6px solid transparent;
+  transition: transform .2s ease, box-shadow .2s ease;
+}
+
+.croquis-tarjeta:hover,
+.croquis-tarjeta:focus-visible {
+  transform: translateY(-6px) scale(1.02);
+  box-shadow: 0 10px 24px rgba(0,0,0,.22);
+}
+
+.croquis-icono {
+  font-size: 46px;
+  line-height: 1;
+}
+
+.croquis-nombre {
+  font-size: 18px;
+  font-weight: bold;
+}
+
+.croquis-desc {
+  font-size: 13px;
+  color: #666;
+}
+
+/* Color propio por área (mismos tonos ya usados en cada módulo) */
+.t-almacen      { border-top-color: #9c27b0; }
+.t-recetas      { border-top-color: #2196F3; }
+.t-calculos     { border-top-color: #1976D2; }
+.t-ventas       { border-top-color: #0288d1; }
+.t-contabilidad { border-top-color: #37474f; }
+.t-usuarios     { border-top-color: #3f51b5; }
+
+/* Responsive: una columna en teléfono, varias en PC (ya lo resuelve
+   el grid con auto-fit/minmax, aquí solo se ajusta el tamaño). */
 @media (max-width: 600px) {
-  h1 {
+  header h1 {
     font-size: 20px;
   }
 
-  .admin-container button {
-    padding: 15px 20px;
-    font-size: 14px;
-    min-width: 140px;
+  .croquis-icono {
+    font-size: 40px;
+  }
+}
+
+@media (max-width: 480px) {
+  .croquis-grid {
+    grid-template-columns: 1fr;
   }
 }

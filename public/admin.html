@@ -4,25 +4,55 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Panel Admin - Cárnicos M&C</title>
+  <link rel="stylesheet" href="css/style.css">
   <link rel="stylesheet" href="css/admin.css">
 </head>
 
 <body class="admin-body">
   <header>
-    <img src="img/logo.png" alt="Logo Empresa" class="logo-admin">
+    <img src="img/logo.png" alt="Logo Empresa" class="logo-admin logo-circulo">
     <h1 id="tituloAdmin">Panel de Administración - Cárnicos M&C</h1>
+    <div class="top-nav">
+      <a href="#" onclick="cambiarCredenciales();return false;">Cambiar usuario/clave</a>
+      <a href="#" onclick="logout();return false;">Salir</a>
+    </div>
   </header>
 
   <main class="admin-container">
-    <!-- Botones principales -->
-    <button onclick="location.href='usuarios.html'">Agregar/Quitar Usuarios</button>
-    <button onclick="location.href='recetas.html'">Recetas</button>
-    <button onclick="location.href='almacen.html'">Almacén</button>
-    <button onclick="location.href='ventas.html'">Área de Ventas</button>
-    <button onclick="location.href='contabilidad.html'">Área de Contabilidad</button>
-    <button onclick="location.href='calculos.html'">Cálculos de Recetas</button>
-    <button onclick="cambiarCredenciales()">Cambiar Usuario/Contraseña Admin</button>
-    <button onclick="logout()">Cerrar sesión</button>
+    <!-- Croquis visual del negocio: cada tarjeta enlaza a su área -->
+    <p class="croquis-intro">Toque un área para entrar.</p>
+    <div class="croquis-grid">
+      <a class="croquis-tarjeta t-almacen" href="almacen.html">
+        <span class="croquis-icono" aria-hidden="true">📦</span>
+        <span class="croquis-nombre">Almacén</span>
+        <span class="croquis-desc">Entradas, salidas y existencias de materia prima y productos.</span>
+      </a>
+      <a class="croquis-tarjeta t-recetas" href="recetas.html">
+        <span class="croquis-icono" aria-hidden="true">📖</span>
+        <span class="croquis-nombre">Recetas</span>
+        <span class="croquis-desc">Fórmulas de cada producto y sus componentes.</span>
+      </a>
+      <a class="croquis-tarjeta t-calculos" href="calculos.html">
+        <span class="croquis-icono" aria-hidden="true">🧮</span>
+        <span class="croquis-nombre">Cálculos / Producción</span>
+        <span class="croquis-desc">Calcular el consumo del almacén y registrar producción.</span>
+      </a>
+      <a class="croquis-tarjeta t-ventas" href="ventas.html">
+        <span class="croquis-icono" aria-hidden="true">🛒</span>
+        <span class="croquis-nombre">Ventas</span>
+        <span class="croquis-desc">Hoja de venta diaria de cada vendedor.</span>
+      </a>
+      <a class="croquis-tarjeta t-contabilidad" href="contabilidad.html">
+        <span class="croquis-icono" aria-hidden="true">📊</span>
+        <span class="croquis-nombre">Contabilidad</span>
+        <span class="croquis-desc">Resumen del negocio, libro e historial completo.</span>
+      </a>
+      <a class="croquis-tarjeta t-usuarios" href="usuarios.html">
+        <span class="croquis-icono" aria-hidden="true">👥</span>
+        <span class="croquis-nombre">Usuarios</span>
+        <span class="croquis-desc">Altas, bajas y permisos del personal.</span>
+      </a>
+    </div>
   </main>
 
   <script src="js/api.js"></script>
