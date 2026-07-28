@@ -54,12 +54,27 @@ jobs:
         run: npx @capacitor/assets generate --android --assetPath assets
 
       - name: Dejar la app en vertical (formato de teléfono)
-        # Se fija la orientación vertical y se impide que el sistema
-        # reinicie la pantalla al girar el teléfono.
+        # Se fija la orientación vertical en la pantalla principal. Se hace
+        # con Node y no con sed porque el nombre de la actividad cambia según
+        # la versión de Capacitor, y así funciona en cualquier caso. Si el
+        # atributo no se pudiera añadir, el paso falla en vez de pasar
+        # inadvertido.
         run: |
-          MANIFIESTO=android/app/src/main/AndroidManifest.xml
-          sed -i 's|android:name="com.carnicosmyc.gestion.MainActivity"|android:name="com.carnicosmyc.gestion.MainActivity"\n            android:screenOrientation="portrait"|' $MANIFIESTO
-          grep -q 'screenOrientation' $MANIFIESTO && echo "Vertical configurado" || echo "Aviso: no se pudo fijar la orientación"
+          node -e "
+          const fs = require('fs');
+          const ruta = 'android/app/src/main/AndroidManifest.xml';
+          let xml = fs.readFileSync(ruta, 'utf8');
+          if (!xml.includes('screenOrientation')) {
+            xml = xml.replace(/<activity([^>]*MainActivity[^>]*)>/, (todo, atributos) =>
+              '<activity' + atributos + ' android:screenOrientation=\"portrait\">');
+            fs.writeFileSync(ruta, xml);
+          }
+          if (!fs.readFileSync(ruta, 'utf8').includes('screenOrientation=\"portrait\"')) {
+            console.error('No se pudo fijar la orientación vertical.');
+            process.exit(1);
+          }
+          console.log('La app abrirá siempre en vertical.');
+          "
 
       - name: Sincronizar la app
         run: npx cap sync android
