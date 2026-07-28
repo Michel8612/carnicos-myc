@@ -20,7 +20,10 @@
 
 [functions]
   node_bundler = "esbuild"
-  external_node_modules = ["pg", "pg-native"]
+  # 'pg' SÍ se empaqueta (es JavaScript puro). Solo se excluye 'pg-native',
+  # que es el binario opcional que 'pg' intenta cargar y no usamos: si se
+  # deja como externo sin instalar, la función no arranca (error 502).
+  external_node_modules = ["pg-native"]
 
 # La API -> función serverless
 [[redirects]]

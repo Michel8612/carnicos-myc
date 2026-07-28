@@ -1,0 +1,13 @@
+{
+  "appId": "com.carnicosmyc.gestion",
+  "appName": "Cárnicos M&C",
+  "webDir": "public",
+  "server": {
+    "url": "https://carnicos-myc-gestion.netlify.app",
+    "cleartext": false,
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": false
+  }
+}

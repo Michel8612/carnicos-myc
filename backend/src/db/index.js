@@ -28,11 +28,10 @@
 
 import pg from 'pg';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+// El esquema viaja como módulo JS (schema.js), no como archivo .sql: en
+// Netlify el código se empaqueta y los archivos sueltos no se incluyen.
+import { SCHEMA_SQL } from './schema.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
 const { Pool } = pg;
 
 // --- Números: que los DOUBLE/NUMERIC lleguen como number, no string ---
@@ -147,8 +146,7 @@ const db = {
 // Crea todas las tablas si no existen. Idempotente: se puede llamar
 // en cada arranque sin peligro.
 export async function inicializarBaseDeDatos() {
-  const schema = readFileSync(join(__dirname, 'schema.sql'), 'utf-8');
-  await pool.query(schema);
+  await pool.query(SCHEMA_SQL);
   console.log('Base de datos lista (PostgreSQL).');
 }
 

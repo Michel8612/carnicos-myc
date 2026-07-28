@@ -42,7 +42,16 @@ import licenciaRoutes, { bloqueoPorLicencia } from './licencia/rutas.js';
 import { inicializarLicencia } from './licencia/licencia.js';
 import { requiereSesion, escrituraSoloRoles } from './middleware/auth.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+// Carpeta de este archivo. En Netlify el código se empaqueta y
+// `import.meta.url` puede no existir; ahí no se sirven archivos estáticos
+// (de eso se encarga Netlify), así que basta con dejarlo vacío.
+const __dirname = (() => {
+  try {
+    return dirname(fileURLToPath(import.meta.url));
+  } catch {
+    return '';
+  }
+})();
 
 const app = express();
 app.use(cors());
@@ -128,8 +137,15 @@ export { app };
 
 // ---- Arranque en local / servidor propio ----
 // Solo si este archivo se ejecuta directamente (no cuando se importa).
-const ejecutadoDirecto =
-  process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+// (En Netlify no aplica: allí la app se importa, nunca se ejecuta directo,
+// y `import.meta.url` puede no existir tras el empaquetado.)
+const ejecutadoDirecto = (() => {
+  try {
+    return Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href;
+  } catch {
+    return false;
+  }
+})();
 
 if (ejecutadoDirecto) {
   const PUERTO = process.env.PUERTO || 3001;

@@ -1,0 +1,72 @@
+# ============================================================
+#  Compilar la app de Android (APK) — Cárnicos M&C
+#
+#  Todo se compila EN GITHUB: aquí no hay que instalar Android
+#  Studio ni el SDK. Al terminar, el APK queda para descargar en
+#  la pestaña "Actions" del repositorio (y en Releases si se
+#  lanza con una etiqueta v1.0.0, v1.1.0...).
+#
+#  La app es un contenedor nativo que abre el sistema alojado en
+#  Netlify, así que se actualiza sola cuando se despliega la web.
+# ============================================================
+
+name: APK Android
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  workflow_dispatch:        # permite lanzarlo a mano desde la web
+
+jobs:
+  construir:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Preparar Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Preparar Java (necesario para Android)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Preparar el SDK de Android
+        uses: android-actions/setup-android@v3
+
+      - name: Instalar dependencias
+        run: npm install
+
+      - name: Instalar Capacitor
+        run: npm install --no-save @capacitor/core @capacitor/cli @capacitor/android
+
+      - name: Crear el proyecto Android
+        run: npx cap add android
+
+      - name: Sincronizar la app
+        run: npx cap sync android
+
+      - name: Compilar el APK
+        working-directory: android
+        run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon
+
+      - name: Guardar el APK como resultado
+        uses: actions/upload-artifact@v4
+        with:
+          name: carnicos-myc-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      # Si se publica con una etiqueta (v1.0.0), además se adjunta
+      # a una "Release" para poder compartir el enlace de descarga.
+      - name: Publicar en Releases
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: android/app/build/outputs/apk/debug/*.apk
