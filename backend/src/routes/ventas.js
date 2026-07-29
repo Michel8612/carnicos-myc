@@ -448,10 +448,12 @@ router.post('/carrito', async (req, res) => {
     const ventaId = r.lastInsertRowid;
 
     for (const l of lineas) {
+      // Se guarda también el nombre: así el historial sigue diciendo qué se
+      // vendió aunque después ese producto se borre o se renombre.
       await db.prepare(`
-        INSERT INTO ventas_detalle (venta_id, producto_id, cantidad, precio_unitario)
-        VALUES (?, ?, ?, ?)
-      `).run(ventaId, l.fila.id, l.cantidad, l.precioUnit);
+        INSERT INTO ventas_detalle (venta_id, producto_id, producto_nombre, cantidad, precio_unitario)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(ventaId, l.fila.id, l.fila.nombre, l.cantidad, l.precioUnit);
     }
 
     // 4) Ingreso en caja.
@@ -518,21 +520,23 @@ router.get('/historial', async (req, res) => {
 
   for (const v of ventas) {
     const detalle = await db.prepare(
-      'SELECT producto_id, cantidad, precio_unitario FROM ventas_detalle WHERE venta_id = ?'
+      'SELECT producto_id, producto_nombre, cantidad, precio_unitario FROM ventas_detalle WHERE venta_id = ?'
     ).all(v.id);
     v.productos = [];
     for (const d of detalle) {
-      // El producto puede venir de la hoja propia del vendedor
-      // (venta_inventario, el caso normal desde /carrito) o del catálogo
-      // general (productos, ventas antiguas). Si ninguno existe ya, se
-      // deja un nombre genérico para no romper el historial.
-      let nombre = null;
-      const enHoja = await db.prepare('SELECT nombre FROM venta_inventario WHERE id = ?').get(d.producto_id);
-      if (enHoja) {
-        nombre = enHoja.nombre;
-      } else {
-        const enCatalogo = await db.prepare('SELECT nombre FROM productos WHERE id = ?').get(d.producto_id);
-        nombre = enCatalogo ? enCatalogo.nombre : 'Producto';
+      // Lo normal es que el nombre venga guardado con la línea. Las ventas
+      // viejas no lo tienen, así que se busca: primero en la hoja propia del
+      // vendedor y luego en el catálogo general. Si el producto ya no existe,
+      // se deja un nombre genérico para no romper el historial.
+      let nombre = d.producto_nombre;
+      if (!nombre) {
+        const enHoja = await db.prepare('SELECT nombre FROM venta_inventario WHERE id = ?').get(d.producto_id);
+        if (enHoja) {
+          nombre = enHoja.nombre;
+        } else {
+          const enCatalogo = await db.prepare('SELECT nombre FROM productos WHERE id = ?').get(d.producto_id);
+          nombre = enCatalogo ? enCatalogo.nombre : 'Producto';
+        }
       }
       v.productos.push({
         nombre,

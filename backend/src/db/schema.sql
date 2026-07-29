@@ -164,10 +164,15 @@ CREATE TABLE IF NOT EXISTS ventas (
   usuario_id INTEGER REFERENCES usuarios(id)
 );
 
+-- OJO: "producto_id" no lleva llave foránea a propósito. Una línea de
+-- venta puede apuntar a un producto del almacén o a uno de la lista
+-- propia del vendedor (venta_inventario), que son tablas distintas. Se
+-- guarda también el nombre para que el historial siga siendo legible.
 CREATE TABLE IF NOT EXISTS ventas_detalle (
   id              SERIAL PRIMARY KEY,
   venta_id        INTEGER NOT NULL REFERENCES ventas(id),
-  producto_id     INTEGER NOT NULL REFERENCES productos(id),
+  producto_id     INTEGER NOT NULL,
+  producto_nombre TEXT,
   cantidad        DOUBLE PRECISION NOT NULL,
   precio_unitario DOUBLE PRECISION DEFAULT 0
 );
@@ -430,3 +435,13 @@ ALTER TABLE venta_inventario ADD COLUMN IF NOT EXISTS imagen TEXT;
 -- se cobró (efectivo, transferencia...).
 ALTER TABLE ventas ADD COLUMN IF NOT EXISTS oculto INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE ventas ADD COLUMN IF NOT EXISTS metodo_pago TEXT;
+
+-- El detalle de una venta puede referirse a dos cosas distintas: a un
+-- producto del almacén, o a un producto de la lista propia del vendedor
+-- (que es otra tabla). Por eso "producto_id" ya no puede estar atado por
+-- llave foránea a "productos": impedía guardar las ventas del carrito.
+-- Se quita esa atadura y se guarda el nombre junto con la línea, que
+-- además hace el historial más fiel: sigue diciendo qué se vendió aunque
+-- después se borre o se renombre el producto.
+ALTER TABLE ventas_detalle DROP CONSTRAINT IF EXISTS ventas_detalle_producto_id_fkey;
+ALTER TABLE ventas_detalle ADD COLUMN IF NOT EXISTS producto_nombre TEXT;
