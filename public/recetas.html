@@ -41,6 +41,13 @@
     .rec-item-cab .acc button { margin-left:6px; }
     .rec-chips { margin-top:6px; font-size:13px; color:#333; }
     .rec-chip { display:inline-block; background:#e3f2fd; border-radius:12px; padding:2px 10px; margin:3px 3px 0 0; }
+    /* Imagen de la receta (popup) */
+    .rec-img-fila { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
+    .rec-img-preview { width:70px; height:70px; object-fit:cover; border-radius:8px; border:1px solid #ccc; }
+    .btn-quitar-img { background:#ef5350; color:#fff; border:none; border-radius:6px; padding:8px 12px; cursor:pointer; }
+    /* Miniatura en la lista de recetas guardadas (y reutilizada en Almacén) */
+    .rec-miniatura { width:44px; height:44px; border-radius:8px; object-fit:cover; flex-shrink:0; display:inline-block; }
+    .rec-miniatura-vacia { background:#cfd8dc; border:1px dashed #90a4ae; }
   </style>
 </head>
 
@@ -93,6 +100,13 @@
             </select>
           </div>
         </div>
+      </div>
+
+      <div class="rec-img-fila">
+        <input type="file" id="recetaImagenInput" accept="image/*" style="display:none;">
+        <button type="button" class="btn-add" id="btnElegirImagen" style="margin:0;">📷 Elegir imagen (opcional)</button>
+        <img id="recetaImagenPreview" class="rec-img-preview" style="display:none;" alt="Vista previa de la receta">
+        <button type="button" class="btn-quitar-img" id="btnQuitarImagen" style="display:none;">Quitar imagen</button>
       </div>
 
       <p class="rec-sub" style="margin-bottom:12px;">El producto terminado será esta misma receta (<b id="nombreEco">…</b>). Se crea/actualiza solo en el Almacén.</p>

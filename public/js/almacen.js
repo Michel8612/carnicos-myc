@@ -1,8 +1,9 @@
 // Gestión de Almacén — Cárnicos M&C
 // Habla con el backend a través de js/api.js (window.API).
 
-// Almacén: solo el rol Almacén (o el Dueño).
-if (!soloRoles(['almacen', 'almacenero'])) {
+// Almacén: el rol Almacén, el Almacenero Central (que atiende todos los
+// almacenes) y el Dueño.
+if (!soloRoles(['almacen', 'almacenero', 'almacen_central'])) {
   throw new Error('sin acceso');
 }
 
@@ -215,7 +216,13 @@ function cargarExistencias() {
     (productos || []).forEach((producto) => {
       const tr = document.createElement('tr');
 
+      // Miniatura del producto; si no tiene foto, un recuadro neutro (no rompe la fila).
+      const miniatura = producto.imagen
+        ? `<img src="${producto.imagen}" class="rec-miniatura" alt="">`
+        : `<span class="rec-miniatura rec-miniatura-vacia"></span>`;
+
       tr.innerHTML = `
+        <td>${miniatura}</td>
         <td>${producto.nombre}</td>
         <td>${TIPO_LABEL[producto.tipo] || producto.tipo}</td>
         <td>${producto.unidad || ''}</td>

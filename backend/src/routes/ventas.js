@@ -65,7 +65,7 @@ router.post('/', async (req, res) => {
         let msg = `No hay suficiente "${nombreProd}" en ese almacén (hay ${hayAqui}, necesita ${it.cantidad}).`;
         if (enOtros.length > 0) {
           const lista = enOtros.map((o) => `${o.almacen}: ${o.cantidad}`).join(', ');
-          msg += ` Sí hay en otro almacén â†’ ${lista}. Cambie el almacén de la venta o traslade el producto.`;
+          msg += ` Sí hay en otro almacén → ${lista}. Cambie el almacén de la venta o traslade el producto.`;
         }
         throw new Error(msg);
       }
@@ -213,11 +213,26 @@ router.get('/hoja', async (req, res) => {
   const usuarioId = duenoDeLaHoja(req, req.query);
 
   const productos = await db.prepare(`
-    SELECT id, nombre, unidad, cantidad, costo_unitario, precio_venta, vendido
+    SELECT id, nombre, unidad, cantidad, costo_unitario, precio_venta, vendido, imagen
     FROM venta_inventario
     WHERE usuario_id = ?
     ORDER BY nombre
   `).all(usuarioId);
+
+  // Si el producto de la hoja no trae su propia imagen, se busca la del
+  // producto terminado con el MISMO NOMBRE (la que dejó la receta), para
+  // que el vendedor la vea sin tener que volver a cargarla.
+  for (const p of productos) {
+    if (!p.imagen) {
+      const match = await db.prepare(`
+        SELECT imagen FROM productos
+        WHERE lower(nombre) = lower(?) AND imagen IS NOT NULL
+        ORDER BY (tipo = 'terminado') DESC
+        LIMIT 1
+      `).get(p.nombre);
+      if (match) p.imagen = match.imagen;
+    }
+  }
 
   let totalIngreso = 0, totalCosto = 0, valorExistencia = 0;
   const filas = productos.map((p) => {
@@ -253,16 +268,16 @@ router.get('/hoja', async (req, res) => {
 // ---------- Agregar un producto a la hoja ----------
 router.post('/producto', async (req, res) => {
   const usuarioId = duenoDeLaHoja(req, req.body);
-  const { nombre, unidad, cantidad, costo_unitario, precio_venta } = req.body;
+  const { nombre, unidad, cantidad, costo_unitario, precio_venta, imagen } = req.body;
   if (!nombre || !String(nombre).trim()) {
     return res.status(400).json({ error: 'Escriba el nombre del producto.' });
   }
   const r = await db.prepare(`
-    INSERT INTO venta_inventario (usuario_id, nombre, unidad, cantidad, costo_unitario, precio_venta)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO venta_inventario (usuario_id, nombre, unidad, cantidad, costo_unitario, precio_venta, imagen)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `).run(
     usuarioId, String(nombre).trim(), unidad || 'u',
-    Number(cantidad) || 0, Number(costo_unitario) || 0, Number(precio_venta) || 0
+    Number(cantidad) || 0, Number(costo_unitario) || 0, Number(precio_venta) || 0, imagen || null
   );
   res.json({ ok: true, id: r.lastInsertRowid });
 });
@@ -278,7 +293,7 @@ router.put('/producto/:id', async (req, res) => {
   const b = req.body;
   await db.prepare(`
     UPDATE venta_inventario
-    SET nombre = ?, unidad = ?, cantidad = ?, costo_unitario = ?, precio_venta = ?, vendido = ?
+    SET nombre = ?, unidad = ?, cantidad = ?, costo_unitario = ?, precio_venta = ?, vendido = ?, imagen = ?
     WHERE id = ?
   `).run(
     b.nombre !== undefined ? String(b.nombre).trim() : fila.nombre,
@@ -287,6 +302,7 @@ router.put('/producto/:id', async (req, res) => {
     b.costo_unitario !== undefined ? Number(b.costo_unitario) : fila.costo_unitario,
     b.precio_venta !== undefined ? Number(b.precio_venta) : fila.precio_venta,
     b.vendido !== undefined ? Number(b.vendido) : fila.vendido,
+    b.imagen !== undefined ? (b.imagen || null) : fila.imagen,
     id
   );
   res.json({ ok: true });
@@ -370,6 +386,175 @@ router.post('/reiniciar', async (req, res) => {
     total_ganancia: Number((totalDinero - totalCosto).toFixed(2)),
     productos: filas.length,
   });
+});
+
+// ============================================================
+//  CARRITO DE VENTA (vende directo desde la hoja propia)
+//
+//  A diferencia de "vendido" (que solo anota y se descuenta al
+//  reiniciar la jornada), el carrito registra la venta al instante:
+//  descuenta la existencia de cada producto de la hoja, crea la
+//  venta con su detalle, la caja y el apunte en el libro, todo en
+//  una sola transacción (o nada, si algo no alcanza).
+// ============================================================
+
+router.post('/carrito', async (req, res) => {
+  const { items, cliente, metodo_pago } = req.body;
+  if (!Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: 'Indique al menos un producto.' });
+  }
+
+  const tx = db.transaction(async () => {
+    let total = 0;
+    let costoTotal = 0;
+    const lineas = [];
+
+    // 1) Validar cada producto: que exista, que sea del vendedor (o el
+    //    usuario sea dueño/admin) y que tenga existencia suficiente.
+    for (const it of items) {
+      const productoId = Number(it.producto_id);
+      const cantidad = Number(it.cantidad);
+      if (!productoId || !cantidad || cantidad <= 0) {
+        throw new Error('Cada producto necesita un id y una cantidad válida.');
+      }
+      const fila = await db.prepare('SELECT * FROM venta_inventario WHERE id = ?').get(productoId);
+      if (!fila) throw new Error('Uno de los productos ya no está en la hoja.');
+      if (fila.usuario_id !== req.usuario.id && !ES_JEFE(req.usuario.rol)) {
+        throw new Error(`"${fila.nombre}" no es de su hoja.`);
+      }
+      if (fila.cantidad < cantidad) {
+        throw new Error(`No hay suficiente "${fila.nombre}" (hay ${fila.cantidad}, pidió ${cantidad}).`);
+      }
+      const precioUnit = fila.precio_venta;
+      const subtotal = Number((cantidad * precioUnit).toFixed(2));
+      total += subtotal;
+      costoTotal += Number((cantidad * fila.costo_unitario).toFixed(2));
+      lineas.push({ fila, cantidad, precioUnit, subtotal });
+    }
+    total = Number(total.toFixed(2));
+    costoTotal = Number(costoTotal.toFixed(2));
+
+    // 2) Alcanza todo: descontar existencia de cada producto de la hoja.
+    for (const l of lineas) {
+      await db.prepare('UPDATE venta_inventario SET cantidad = cantidad - ? WHERE id = ?')
+        .run(l.cantidad, l.fila.id);
+    }
+
+    // 3) Registrar la venta (pagada de una vez: es venta de mostrador) y su detalle.
+    const r = await db.prepare(`
+      INSERT INTO ventas (cliente, total, pagado, estado, metodo_pago, usuario_id)
+      VALUES (?, ?, ?, 'pagada', ?, ?)
+    `).run(cliente || 'Cliente', total, total, metodo_pago || null, req.usuario.id);
+    const ventaId = r.lastInsertRowid;
+
+    for (const l of lineas) {
+      await db.prepare(`
+        INSERT INTO ventas_detalle (venta_id, producto_id, cantidad, precio_unitario)
+        VALUES (?, ?, ?, ?)
+      `).run(ventaId, l.fila.id, l.cantidad, l.precioUnit);
+    }
+
+    // 4) Ingreso en caja.
+    if (total > 0) {
+      await db.prepare(`
+        INSERT INTO caja (tipo, concepto, monto, moneda, origen_tipo, origen_id, usuario_id)
+        VALUES ('ingreso', ?, ?, 'CUP', 'venta', ?, ?)
+      `).run(`Venta a ${cliente || 'Cliente'}`, total, ventaId, req.usuario.id);
+    }
+
+    // 5) Apunte en el libro de contabilidad.
+    await anotar({
+      tipo: 'venta',
+      concepto: `Venta — ${cliente || 'Cliente'}`,
+      producto: lineas.map((l) => l.fila.nombre).join(', '),
+      cantidad: lineas.reduce((s, l) => s + l.cantidad, 0),
+      unidad: '',
+      costo: costoTotal,
+      ingreso: total,
+      area: 'ventas',
+      usuario: req.usuario,
+      nota: metodo_pago || null,
+    });
+
+    return {
+      ventaId, total,
+      items: lineas.map((l) => ({
+        producto_id: l.fila.id, nombre: l.fila.nombre,
+        cantidad: l.cantidad, precio_unitario: l.precioUnit, subtotal: l.subtotal,
+      })),
+    };
+  });
+
+  try {
+    const resultado = await tx();
+    res.json({ ok: true, venta_id: resultado.ventaId, total: resultado.total, items: resultado.items });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ============================================================
+//  HISTORIAL DE VENTAS
+//
+//  Cada vendedor ve las suyas; el dueño/admin ve todas. "Eliminar"
+//  del historial solo OCULTA el registro (oculto=1): no borra la
+//  venta ni toca inventario, caja o contabilidad, para no perder
+//  el rastro económico real.
+// ============================================================
+
+router.get('/historial', async (req, res) => {
+  const esJefe = ES_JEFE(req.usuario.rol);
+  const filtroUsuario = esJefe ? '' : 'AND v.usuario_id = ?';
+  const params = esJefe ? [] : [req.usuario.id];
+
+  const ventas = await db.prepare(`
+    SELECT v.id, v.fecha, v.cliente, v.total, v.metodo_pago, u.nombre AS usuario_nombre
+    FROM ventas v
+    LEFT JOIN usuarios u ON u.id = v.usuario_id
+    WHERE v.oculto = 0 ${filtroUsuario}
+    ORDER BY v.fecha DESC
+    LIMIT 200
+  `).all(...params);
+
+  for (const v of ventas) {
+    const detalle = await db.prepare(
+      'SELECT producto_id, cantidad, precio_unitario FROM ventas_detalle WHERE venta_id = ?'
+    ).all(v.id);
+    v.productos = [];
+    for (const d of detalle) {
+      // El producto puede venir de la hoja propia del vendedor
+      // (venta_inventario, el caso normal desde /carrito) o del catálogo
+      // general (productos, ventas antiguas). Si ninguno existe ya, se
+      // deja un nombre genérico para no romper el historial.
+      let nombre = null;
+      const enHoja = await db.prepare('SELECT nombre FROM venta_inventario WHERE id = ?').get(d.producto_id);
+      if (enHoja) {
+        nombre = enHoja.nombre;
+      } else {
+        const enCatalogo = await db.prepare('SELECT nombre FROM productos WHERE id = ?').get(d.producto_id);
+        nombre = enCatalogo ? enCatalogo.nombre : 'Producto';
+      }
+      v.productos.push({
+        nombre,
+        cantidad: d.cantidad,
+        precio_unitario: d.precio_unitario,
+        subtotal: Number((d.cantidad * d.precio_unitario).toFixed(2)),
+      });
+    }
+  }
+
+  res.json(ventas);
+});
+
+router.delete('/historial/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  const venta = await db.prepare('SELECT * FROM ventas WHERE id = ?').get(id);
+  if (!venta) return res.status(404).json({ error: 'Venta no encontrada.' });
+  if (venta.usuario_id !== req.usuario.id && !ES_JEFE(req.usuario.rol)) {
+    return res.status(403).json({ error: 'Esa venta no es suya.' });
+  }
+  await db.prepare('UPDATE ventas SET oculto = 1 WHERE id = ?').run(id);
+  res.json({ ok: true });
 });
 
 export default router;

@@ -1,16 +1,17 @@
 // ============================================================
 //  Cálculos y Producción — Cárnicos M&C (sin Firebase)
 //
-//  El usuario elige una receta y dice CUÁNTAS LIBRAS (o kg/g) de
-//  producto final quiere. El sistema:
+//  El usuario elige una receta, EL ALMACÉN de donde va a salir todo,
+//  y dice CUÁNTAS LIBRAS (o kg/g) de producto final quiere. El sistema:
 //   - extrapola cuánto de cada componente hace falta (regla de 3
 //     sobre el rinde base de la receta),
-//   - lo cruza con lo que hay EN EL ALMACÉN (disponible / falta),
+//   - lo cruza con lo que hay EN ESE ALMACÉN (disponible / falta),
 //   - calcula el costo total y por unidad,
 //   - y permite REGISTRAR LA PRODUCCIÓN: queda en el historial de
-//     cocina (qué se produjo, qué consumió y cuánto costó) pero NO
-//     descuenta del almacén: la cocina y el almacén llevan
-//     contabilidades separadas.
+//     cocina (qué se produjo, qué consumió y cuánto costó) Y AHORA
+//     TAMBIÉN descuenta los ingredientes del almacén elegido. Si no
+//     alcanza algún componente, el backend rechaza la producción
+//     (400) y dice exactamente qué falta.
 // ============================================================
 
 // Solo el Cocinero (o el Dueño) calcula y produce.
@@ -115,7 +116,7 @@ async function calcular() {
 
   let avisos = [];
   if (previa.hay_faltantes) {
-    avisos.push('Según el almacén, no alcanza algún componente. Es solo informativo: registrar la producción no modifica el almacén.');
+    avisos.push('Según este almacén, no alcanza algún componente. Si intenta registrar la producción, el sistema la rechazará y le dirá qué falta.');
   }
   if (previa.hay_sin_costo) {
     avisos.push('Aviso: algún componente no tiene precio de costo, así que el costo mostrado es menor al real.');
@@ -151,21 +152,32 @@ async function producir() {
 
   const u = unidadDeReceta();
   const cantidad = Number(inpCantidad.value);
-  if (!confirm(`¿Registrar la producción de ${fmt(cantidad)} ${u} de ${r.nombre}?\n\nQueda en el historial de cocina con su costo. El almacén NO se modifica.`)) return;
+  const almacenNombre = (ALMACENES.find((a) => String(a.id) === String(almacenId)) || {}).nombre || 'elegido';
+  if (!confirm(`¿Registrar la producción de ${fmt(cantidad)} ${u} de ${r.nombre}?\n\nSe descontarán los ingredientes del almacén "${almacenNombre}".`)) return;
 
   const btn = document.getElementById('btnProducir');
   btn.disabled = true; btn.textContent = 'Registrando…';
+  avisoFalta.style.display = 'none'; // limpiar el aviso de faltantes de un intento anterior
   try {
     // Se manda la cantidad final (lb/kg) que pidió el usuario; el servidor
-    // la traduce al rinde de la receta.
+    // la traduce al rinde de la receta y descuenta del almacén elegido.
     const res = await API.recetaProducir(r.id, { cantidad_final: cantidad, almacen_id: Number(almacenId) });
     avisoResultado.style.display = 'block';
-    let msg = `✓ Registrado: ${fmt(res.cantidad_producida)} ${u} de ${r.nombre}. Costo total ${money(res.costo_total)} (${money(res.costo_unitario)} por ${u}). Queda en el historial de cocina; el almacén no se modificó.`;
+    let msg = `✓ Registrado: ${fmt(res.cantidad_producida)} ${u} de ${r.nombre}. Costo total ${money(res.costo_total)} (${money(res.costo_unitario)} por ${u}). Se descontaron los ingredientes del almacén "${almacenNombre}".`;
     if (res.avisos && res.avisos.length) msg += ' ⚠ ' + res.avisos.join(' · ');
     avisoResultado.textContent = msg;
     await calcular(); // refrescar disponibilidades
   } catch (e) {
-    alert(e.message);
+    // Si el backend rechazó por falta de ingredientes (400 con `faltantes`),
+    // se muestra la lista detallada en el aviso de la pantalla en vez de un alert genérico.
+    const faltantes = e.data && Array.isArray(e.data.faltantes) ? e.data.faltantes : null;
+    if (faltantes && faltantes.length) {
+      avisoFalta.style.display = 'block';
+      avisoFalta.textContent = 'No se pudo producir, falta: ' +
+        faltantes.map((f) => `${f.producto} (necesita ${fmt(f.necesita)}, hay ${fmt(f.disponible)}, faltan ${fmt(f.falta)})`).join('; ') + '.';
+    } else {
+      alert(e.message);
+    }
   } finally {
     btn.disabled = false; btn.textContent = 'Registrar producción';
   }

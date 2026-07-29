@@ -126,7 +126,7 @@ router.post('/', async (req, res) => {
   if (!ES_COCINA(req.usuario.rol)) {
     return res.status(403).json({ error: 'Esta acción es solo para cocina.' });
   }
-  let { producto_final_id, nombre, rinde_cantidad, rinde_unidad, ingredientes } = req.body;
+  let { producto_final_id, nombre, rinde_cantidad, rinde_unidad, ingredientes, imagen } = req.body;
   if (!nombre) {
     return res.status(400).json({ error: 'Escriba el nombre de la receta.' });
   }
@@ -137,14 +137,18 @@ router.post('/', async (req, res) => {
     // Si no vino un producto final, se resuelve/crea con el nombre de la receta.
     const finalId = producto_final_id || (await resolverProductoFinal(nombre, rinde_unidad));
     const r = await db.prepare(`
-      INSERT INTO recetas (producto_final_id, nombre, rinde_cantidad, rinde_unidad, usuario_id)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(finalId, nombre, rinde_cantidad || 1, rinde_unidad || 'lb', req.usuario.id);
+      INSERT INTO recetas (producto_final_id, nombre, rinde_cantidad, rinde_unidad, usuario_id, imagen)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(finalId, nombre, rinde_cantidad || 1, rinde_unidad || 'lb', req.usuario.id, imagen || null);
     const recetaId = r.lastInsertRowid;
     for (const ing of ingredientes) {
       if (!ing.producto_id || !ing.cantidad) continue;
       await db.prepare('INSERT INTO receta_ingredientes (receta_id, producto_id, cantidad) VALUES (?, ?, ?)')
         .run(recetaId, ing.producto_id, Number(ing.cantidad));
+    }
+    // El producto terminado hereda la imagen de la receta (si trae una).
+    if (imagen) {
+      await db.prepare('UPDATE productos SET imagen = ? WHERE id = ?').run(imagen, finalId);
     }
     return recetaId;
   });
@@ -157,16 +161,24 @@ router.put('/:id', async (req, res) => {
     return res.status(403).json({ error: 'Esta acción es solo para cocina.' });
   }
   const id = Number(req.params.id);
-  const { nombre, rinde_cantidad, rinde_unidad, ingredientes } = req.body;
+  const { nombre, rinde_cantidad, rinde_unidad, ingredientes, imagen } = req.body;
   const tx = db.transaction(async () => {
-    // Traer la receta para conocer su producto final actual.
-    const actual = await db.prepare('SELECT producto_final_id FROM recetas WHERE id = ?').get(id);
-    await db.prepare('UPDATE recetas SET nombre = ?, rinde_cantidad = ?, rinde_unidad = ? WHERE id = ?')
-      .run(nombre, rinde_cantidad || 1, rinde_unidad || 'lb', id);
+    // Traer la receta para conocer su producto final actual y su imagen.
+    const actual = await db.prepare('SELECT producto_final_id, imagen FROM recetas WHERE id = ?').get(id);
+    // Si no viene 'imagen' en el body (undefined), se conserva la que ya
+    // tenía la receta; si viene (string o null), se guarda tal cual.
+    const imagenFinal = imagen !== undefined ? (imagen || null) : (actual ? actual.imagen : null);
+    await db.prepare('UPDATE recetas SET nombre = ?, rinde_cantidad = ?, rinde_unidad = ?, imagen = ? WHERE id = ?')
+      .run(nombre, rinde_cantidad || 1, rinde_unidad || 'lb', imagenFinal, id);
     // Mantener sincronizado el nombre del producto terminado con la receta.
     if (actual && actual.producto_final_id && nombre) {
       await db.prepare("UPDATE productos SET nombre = ? WHERE id = ? AND tipo = 'terminado'")
         .run(nombre, actual.producto_final_id);
+    }
+    // El producto terminado hereda la imagen SOLO si la receta trae una
+    // nueva; si la receta no trae, no se borra la que ya tuviera el producto.
+    if (imagen && actual && actual.producto_final_id) {
+      await db.prepare('UPDATE productos SET imagen = ? WHERE id = ?').run(imagen, actual.producto_final_id);
     }
     await db.prepare('DELETE FROM receta_ingredientes WHERE receta_id = ?').run(id);
     for (const ing of (ingredientes || [])) {
@@ -261,10 +273,10 @@ router.get('/:id/previa', async (req, res) => {
 });
 
 // ---------- REGISTRAR PRODUCCIÓN (cocina) ----------
-// La cocina y el almacén llevan contabilidades SEPARADAS: aquí se
-// registra qué se produjo, qué consumió y cuánto costó (queda en el
-// historial de cocina y en los reportes), pero NO se tocan las
-// existencias del almacén. El almacenero descarga su inventario aparte.
+// Producir consume ingredientes DE VERDAD del almacén indicado: si falta
+// alguno, no se produce nada (todo o nada). El producto terminado NO entra
+// directo al almacén: queda en produccion_disponible hasta que el
+// almacenero (o el dueño) le dé entrada desde su propia área.
 router.post('/:id/producir', async (req, res) => {
   if (!ES_COCINA(req.usuario.rol)) {
     return res.status(403).json({ error: 'Esta acción es solo para cocina.' });
@@ -291,28 +303,60 @@ router.post('/:id/producir', async (req, res) => {
   }
 
   const cantidadProducida = Number((receta.rinde_cantidad * factor).toFixed(3));
-  const avisos = [];
 
   const tx = db.transaction(async () => {
     let costoTotal = 0;
+    const faltantes = [];
+    const necesidades = [];
 
-    // 1) Calcular el consumo y su costo. Se AVISA si el almacén no tiene
-    //    suficiente, pero NO se descuenta nada: el almacén es otra
-    //    contabilidad y se descarga por su propia sección.
+    // 1) Validar existencias de TODOS los ingredientes escalados en el
+    //    almacén elegido, ANTES de tocar nada.
     for (const ing of ingredientes) {
       const necesita = Number((ing.cantidad * factor).toFixed(3));
       const costoUnit = ing.precio_costo || 0;
-      costoTotal += Number((necesita * costoUnit).toFixed(2));
-
-      const ex = await db.prepare('SELECT cantidad FROM existencias WHERE producto_id=? AND almacen_id=?')
+      const ex = await db.prepare('SELECT id, cantidad FROM existencias WHERE producto_id=? AND almacen_id=?')
         .get(ing.producto_id, almacenId);
-      const hay = ex ? ex.cantidad : 0;
-      if (hay < necesita) {
-        avisos.push(`${ing.producto_nombre}: en almacén hay ${hay} y hacen falta ${necesita}`);
+      const disponible = ex ? ex.cantidad : 0;
+      necesidades.push({
+        producto_id: ing.producto_id, nombre: ing.producto_nombre,
+        necesita, costoUnit, exId: ex ? ex.id : null, disponible,
+      });
+      if (disponible < necesita) {
+        faltantes.push({
+          producto: ing.producto_nombre,
+          necesita,
+          disponible: Number(disponible.toFixed(3)),
+          falta: Number((necesita - disponible).toFixed(3)),
+        });
       }
     }
+    // Si falta algo, se corta aquí: nada se ha escrito todavía, así que
+    // no hace falta deshacer nada (la transacción ni siquiera escribió).
+    if (faltantes.length > 0) {
+      const err = new Error('No hay suficiente inventario en ese almacén para producir esta receta.');
+      err.faltantes = faltantes;
+      throw err;
+    }
 
-    // 2) Registrar la producción (historial de cocina)
+    // 2) Alcanza: descontar cada ingrediente del almacén y dejar el
+    //    rastro (una salida por ingrediente, como cualquier otra salida).
+    for (const n of necesidades) {
+      costoTotal += Number((n.necesita * n.costoUnit).toFixed(2));
+      const nueva = Number((n.disponible - n.necesita).toFixed(3));
+      if (n.exId) {
+        await db.prepare('UPDATE existencias SET cantidad = ? WHERE id = ?').run(nueva, n.exId);
+      } else {
+        await db.prepare('INSERT INTO existencias (producto_id, almacen_id, cantidad) VALUES (?, ?, ?)')
+          .run(n.producto_id, almacenId, nueva);
+      }
+      await db.prepare(`
+        INSERT INTO movimientos (producto_id, almacen_id, tipo, cantidad, origen_tipo, usuario_id, nota)
+        VALUES (?, ?, 'salida', ?, 'produccion', ?, ?)
+      `).run(n.producto_id, almacenId, n.necesita, req.usuario.id,
+        [`Consumo para producir: ${receta.nombre}`, nota].filter(Boolean).join(' · '));
+    }
+
+    // 3) Registrar la producción (historial de cocina)
     const prod = await db.prepare(`
       INSERT INTO producciones
         (receta_id, producto_final_id, cantidad_producida, factor_escala, costo_total, almacen_id, usuario_id, nota)
@@ -320,17 +364,15 @@ router.post('/:id/producir', async (req, res) => {
     `).run(id, receta.producto_final_id, cantidadProducida, factor, Number(costoTotal.toFixed(2)), almacenId, req.usuario.id, nota);
     const prodId = prod.lastInsertRowid;
 
-    // 3) Detalle de consumo (qué llevó y cuánto costó cada componente)
-    for (const ing of ingredientes) {
-      const necesita = Number((ing.cantidad * factor).toFixed(3));
-      const costoUnit = ing.precio_costo || 0;
+    // 4) Detalle de consumo (qué llevó y cuánto costó cada componente)
+    for (const n of necesidades) {
       await db.prepare(`
         INSERT INTO produccion_consumo (produccion_id, producto_id, cantidad, costo_unitario, costo)
         VALUES (?, ?, ?, ?, ?)
-      `).run(prodId, ing.producto_id, necesita, costoUnit, Number((necesita * costoUnit).toFixed(2)));
+      `).run(prodId, n.producto_id, n.necesita, n.costoUnit, Number((n.necesita * n.costoUnit).toFixed(2)));
     }
 
-    // 4) Actualizar el costo por unidad del producto terminado (ficha de costo)
+    // 5) Actualizar el costo por unidad del producto terminado (ficha de costo)
     let costoUnitFinal = 0;
     if (cantidadProducida > 0) {
       costoUnitFinal = Number((costoTotal / cantidadProducida).toFixed(4));
@@ -338,9 +380,10 @@ router.post('/:id/producir', async (req, res) => {
         .run(costoUnitFinal, receta.producto_final_id);
     }
 
-    // 5) Dejarlo disponible para que el ALMACENERO le dé entrada cuando
-    //    corresponda. Producir NO mete esto al almacén todavía: es la
-    //    cocina, no el almacén (ver /disponibles/:id/al-almacen).
+    // 6) Dejarlo disponible para que el ALMACENERO le dé entrada cuando
+    //    corresponda. Producir NO mete el producto terminado al almacén
+    //    todavía (ver /disponibles/:id/al-almacen); los INGREDIENTES sí
+    //    se descontaron de verdad arriba, en el paso 2.
     await db.prepare(`
       INSERT INTO produccion_disponible
         (produccion_id, producto_nombre, cantidad, unidad, costo_unitario, entregado)
@@ -350,12 +393,20 @@ router.post('/:id/producir', async (req, res) => {
     return { prodId, costoTotal: Number(costoTotal.toFixed(2)) };
   });
 
-  const resultado = await tx();
+  let resultado;
+  try {
+    resultado = await tx();
+  } catch (err) {
+    if (err.faltantes) {
+      return res.status(400).json({ error: err.message, faltantes: err.faltantes });
+    }
+    return res.status(400).json({ error: err.message });
+  }
 
   // Que el contador lo vea: la cocina consumió materia prima por este valor.
-  // Producir NO es una pérdida: es convertir materia prima en producto
-  // terminado. El costo se reconoce cuando el producto se VENDE (eso lo
-  // hace el área de ventas). Aquí se guarda el valor como referencia.
+  // El consumo ahora es real (se descontó el almacén arriba); se guarda el
+  // valor consumido igual que antes (no se convierte en "costo" del libro:
+  // eso se reconoce cuando el producto se VENDE, que lo hace el área de ventas).
   await anotar({
     tipo: 'produccion',
     concepto: `Producción — ${receta.nombre}`,
@@ -376,9 +427,8 @@ router.post('/:id/producir', async (req, res) => {
     cantidad_producida: cantidadProducida,
     costo_total: resultado.costoTotal,
     costo_unitario: cantidadProducida > 0 ? Number((resultado.costoTotal / cantidadProducida).toFixed(4)) : 0,
-    avisos,
-    // Deja claro para quien consuma la API que el almacén no se movió.
-    afecta_almacen: false,
+    // Ahora sí afecta el almacén: los ingredientes se descontaron de verdad.
+    afecta_almacen: true,
   });
 });
 
@@ -436,12 +486,20 @@ router.post('/disponibles/:id/al-almacen', async (req, res) => {
 
     let productoId;
     if (existente) {
+      // Ya existe: se conserva tal cual (con su imagen actual, si tiene).
       productoId = existente.id;
     } else {
       const uni = await db.prepare('SELECT id FROM unidades WHERE abreviatura = ?').get(disponible.unidad || 'lb');
+      // Producto nuevo: hereda la imagen de la receta que lo produjo (si tiene).
+      const receta = await db.prepare(`
+        SELECT r.imagen
+        FROM producciones pr
+        JOIN recetas r ON r.id = pr.receta_id
+        WHERE pr.id = ?
+      `).get(disponible.produccion_id);
       const nuevo = await db.prepare(
-        'INSERT INTO productos (nombre, tipo, unidad_id, precio_costo) VALUES (?, ?, ?, ?)'
-      ).run(disponible.producto_nombre, 'terminado', uni ? uni.id : null, disponible.costo_unitario || 0);
+        'INSERT INTO productos (nombre, tipo, unidad_id, precio_costo, imagen) VALUES (?, ?, ?, ?, ?)'
+      ).run(disponible.producto_nombre, 'terminado', uni ? uni.id : null, disponible.costo_unitario || 0, receta ? receta.imagen : null);
       productoId = nuevo.lastInsertRowid;
     }
 

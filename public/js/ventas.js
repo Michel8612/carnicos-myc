@@ -15,6 +15,8 @@
 if (!soloRoles(['ventas'])) { throw new Error('sin acceso'); }
 
 let verUsuarioId = null;   // el dueño puede mirar la hoja de otro vendedor
+let productosActuales = []; // última hoja cargada (para pintar el catálogo)
+let carrito = [];           // { producto_id, nombre, unidad, precio_venta, existencia, cantidad } — solo en memoria
 
 const hojaBody = document.getElementById('hojaBody');
 const tablaHoja = document.getElementById('tablaHoja');
@@ -25,6 +27,16 @@ const modalProd = document.getElementById('modalProd');
 const mpError = document.getElementById('mpError');
 
 const money = (n) => Number(n ?? 0).toLocaleString('es-CU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// ------------------------------------------------------------
+// Endpoints nuevos (carrito de venta e historial). Todavía no están
+// en api.js (lo edita otro agente), así que los definimos aquí mismo
+// reutilizando apiFetch(), la misma función global que usa api.js
+// para mandar el token de sesión en cada petición.
+// ------------------------------------------------------------
+const ventasCarrito = (datos) => apiFetch('/ventas/carrito', { method: 'POST', body: JSON.stringify(datos) });
+const ventasHistorial = () => apiFetch('/ventas/historial');
+const ventasHistorialBorrar = (id) => apiFetch(`/ventas/historial/${id}`, { method: 'DELETE' });
 
 document.getElementById('fechaHoy').textContent = new Date().toLocaleDateString('es-CU', { weekday: 'long', day: 'numeric', month: 'long' });
 
@@ -56,6 +68,10 @@ async function cargar() {
   } else {
     document.getElementById('vendedorNombre').textContent = yo.nombre || '';
   }
+
+  // Guardamos la lista para pintar el catálogo (misma fuente que la tabla).
+  productosActuales = d.productos || [];
+  renderCatalogo();
 
   if (!d.productos.length) {
     tablaHoja.style.display = 'none'; vacioHoja.style.display = 'block'; hojaBody.innerHTML = '';
@@ -186,7 +202,252 @@ document.getElementById('mpGuardar').addEventListener('click', async () => {
 // El dueño cambia de vendedor.
 selectorVendedor.addEventListener('change', () => {
   verUsuarioId = selectorVendedor.value ? Number(selectorVendedor.value) : null;
+  // El carrito es de UN vendedor a la vez: al cambiar de vendedor se vacía,
+  // para no mezclar productos de hojas distintas en una misma venta.
+  carrito = [];
+  renderCarrito();
   cargar();
 });
+
+// ============================================================
+//  Pestañas: Hoja del día / Catálogo / Historial
+// ============================================================
+const tabsVentas = document.getElementById('tabsVentas');
+const panelesVista = document.querySelectorAll('.panel-vista');
+
+function cambiarVista(panelId) {
+  tabsVentas.querySelectorAll('button').forEach((b) => b.classList.toggle('tv-activo', b.dataset.panel === panelId));
+  panelesVista.forEach((p) => p.classList.toggle('activo', p.id === panelId));
+  if (panelId === 'pHistorial') cargarHistorial();
+}
+tabsVentas.querySelectorAll('button').forEach((b) => {
+  b.addEventListener('click', () => cambiarVista(b.dataset.panel));
+});
+
+// ============================================================
+//  Catálogo (tarjetas para vender rápido)
+// ============================================================
+const catalogoGrid = document.getElementById('catalogoGrid');
+const catalogoVacio = document.getElementById('catalogoVacio');
+
+const inicialDe = (nombre) => (nombre || '?').trim().charAt(0).toUpperCase();
+
+function renderCatalogo() {
+  const disponibles = productosActuales.filter((p) => Number(p.cantidad) > 0);
+  if (!disponibles.length) {
+    catalogoGrid.innerHTML = '';
+    catalogoVacio.style.display = 'block';
+    return;
+  }
+  catalogoVacio.style.display = 'none';
+  catalogoGrid.innerHTML = disponibles.map((p) => `
+    <div class="cat-tarjeta" data-id="${p.id}" title="Toque para agregar al carrito">
+      <div class="cat-img">
+        ${p.imagen ? `<img src="${p.imagen}" alt="${p.nombre}">` : `<span class="cat-inicial">${inicialDe(p.nombre)}</span>`}
+      </div>
+      <div class="cat-nombre">${p.nombre}</div>
+      <div class="cat-precio">${money(p.precio_venta)}</div>
+      <div class="cat-exist">Existencia: ${p.cantidad} ${p.unidad}</div>
+    </div>`).join('');
+  catalogoGrid.querySelectorAll('.cat-tarjeta').forEach((el) => {
+    el.addEventListener('click', () => agregarAlCarrito(Number(el.dataset.id)));
+  });
+}
+
+// ============================================================
+//  Carrito
+// ============================================================
+const carritoLista = document.getElementById('carritoLista');
+const carritoVacio = document.getElementById('carritoVacio');
+const carritoTotalEl = document.getElementById('carritoTotal');
+const carritoAviso = document.getElementById('carritoAviso');
+let avisoTimeout = null;
+
+function avisarCarrito(msg) {
+  carritoAviso.textContent = msg;
+  carritoAviso.classList.add('mostrar');
+  clearTimeout(avisoTimeout);
+  avisoTimeout = setTimeout(() => carritoAviso.classList.remove('mostrar'), 3000);
+}
+
+function agregarAlCarrito(id) {
+  const prod = productosActuales.find((p) => p.id === id);
+  if (!prod) return;
+  const linea = carrito.find((l) => l.producto_id === id);
+  const enCarritoYa = linea ? linea.cantidad : 0;
+  if (enCarritoYa + 1 > Number(prod.cantidad)) {
+    avisarCarrito(`No hay más existencia de "${prod.nombre}" (disponible: ${prod.cantidad}).`);
+    return;
+  }
+  if (linea) {
+    linea.cantidad += 1;
+  } else {
+    carrito.push({
+      producto_id: id,
+      nombre: prod.nombre,
+      unidad: prod.unidad,
+      precio_venta: Number(prod.precio_venta) || 0,
+      existencia: Number(prod.cantidad) || 0,
+      cantidad: 1,
+    });
+  }
+  renderCarrito();
+}
+
+function cambiarCantidadCarrito(id, delta) {
+  const linea = carrito.find((l) => l.producto_id === id);
+  if (!linea) return;
+  const nueva = linea.cantidad + delta;
+  if (nueva <= 0) {
+    carrito = carrito.filter((l) => l.producto_id !== id);
+    renderCarrito();
+    return;
+  }
+  if (nueva > linea.existencia) {
+    avisarCarrito(`Solo hay ${linea.existencia} ${linea.unidad} de "${linea.nombre}" disponibles.`);
+    return;
+  }
+  linea.cantidad = nueva;
+  renderCarrito();
+}
+
+function renderCarrito() {
+  if (!carrito.length) {
+    carritoLista.innerHTML = '';
+    carritoVacio.style.display = 'block';
+    carritoTotalEl.textContent = money(0);
+    return;
+  }
+  carritoVacio.style.display = 'none';
+  let total = 0;
+  carritoLista.innerHTML = carrito.map((l) => {
+    const subtotal = l.cantidad * l.precio_venta;
+    total += subtotal;
+    return `
+      <div class="carrito-linea" data-id="${l.producto_id}">
+        <div class="cl-nombre">${l.nombre}</div>
+        <div class="cl-cant">
+          <button class="cl-btn cl-menos" data-id="${l.producto_id}" title="Quitar uno">−</button>
+          <span>${l.cantidad}</span>
+          <button class="cl-btn cl-mas" data-id="${l.producto_id}" title="Agregar uno">+</button>
+        </div>
+        <div class="cl-precio">${money(l.precio_venta)}</div>
+        <div class="cl-subtotal">${money(subtotal)}</div>
+      </div>`;
+  }).join('');
+  carritoTotalEl.textContent = money(total);
+  carritoLista.querySelectorAll('.cl-menos').forEach((b) => b.addEventListener('click', () => cambiarCantidadCarrito(Number(b.dataset.id), -1)));
+  carritoLista.querySelectorAll('.cl-mas').forEach((b) => b.addEventListener('click', () => cambiarCantidadCarrito(Number(b.dataset.id), 1)));
+}
+
+document.getElementById('btnCarritoCancelar').addEventListener('click', () => {
+  if (!carrito.length) return;
+  if (!confirm('¿Vaciar el carrito? Se perderán los productos agregados (no afecta la existencia).')) return;
+  carrito = [];
+  renderCarrito();
+});
+
+// ---- Popup: confirmar pago del carrito ----
+const modalPago = document.getElementById('modalPago');
+const pgError = document.getElementById('pgError');
+
+function abrirModalPago() {
+  if (!carrito.length) { avisarCarrito('El carrito está vacío.'); return; }
+  pgError.style.display = 'none';
+  document.getElementById('pgCliente').value = '';
+  document.getElementById('pgMetodo').value = 'Efectivo';
+  modalPago.classList.add('abierto');
+}
+function cerrarModalPago() { modalPago.classList.remove('abierto'); }
+
+document.getElementById('btnCarritoPagar').addEventListener('click', abrirModalPago);
+document.getElementById('pgCancelar').addEventListener('click', cerrarModalPago);
+modalPago.addEventListener('click', (e) => { if (e.target === modalPago) cerrarModalPago(); });
+
+document.getElementById('pgConfirmar').addEventListener('click', async () => {
+  pgError.style.display = 'none';
+  const body = {
+    items: carrito.map((l) => ({ producto_id: l.producto_id, cantidad: l.cantidad })),
+  };
+  const cliente = document.getElementById('pgCliente').value.trim();
+  const metodo = document.getElementById('pgMetodo').value;
+  if (cliente) body.cliente = cliente;
+  if (metodo) body.metodo_pago = metodo;
+  if (verUsuarioId) body.usuario_id = verUsuarioId; // el dueño vendiendo por otro vendedor
+
+  try {
+    const r = await ventasCarrito(body);
+    cerrarModalPago();
+    carrito = [];
+    renderCarrito();
+    await cargar(); // refresca existencia y totales con lo recién vendido
+    alert(`Venta registrada.\n\nTotal cobrado: ${money(r.total)}`);
+  } catch (e) {
+    // No se vacía el carrito: el usuario puede corregir y reintentar.
+    pgError.style.display = 'block';
+    pgError.textContent = e.message;
+  }
+});
+
+// ============================================================
+//  Historial de ventas
+// ============================================================
+const historialLista = document.getElementById('historialLista');
+const historialVacio = document.getElementById('historialVacio');
+
+async function cargarHistorial() {
+  historialVacio.style.display = 'none';
+  historialLista.innerHTML = '<p class="ayuda">Cargando historial…</p>';
+  try {
+    const ventas = await ventasHistorial();
+    renderHistorial(ventas || []);
+  } catch (e) {
+    historialLista.innerHTML = '';
+    historialVacio.style.display = 'block';
+    historialVacio.textContent = 'No se pudo cargar el historial: ' + e.message;
+  }
+}
+
+function renderHistorial(ventas) {
+  if (!ventas.length) {
+    historialLista.innerHTML = '';
+    historialVacio.style.display = 'block';
+    historialVacio.textContent = 'Todavía no hay ventas registradas.';
+    return;
+  }
+  historialVacio.style.display = 'none';
+  historialLista.innerHTML = ventas.map((v) => `
+    <div class="hist-tarjeta" data-id="${v.id}">
+      <button class="hist-x" data-id="${v.id}" title="Borrar este registro del historial">×</button>
+      <div class="hist-cab">
+        <span class="hist-fecha">${new Date(v.fecha).toLocaleString('es-CU', { dateStyle: 'medium', timeStyle: 'short' })}</span>
+        <span>${v.usuario_nombre || ''}</span>
+      </div>
+      ${v.cliente ? `<div class="hist-cliente">Cliente: ${v.cliente}</div>` : ''}
+      ${v.metodo_pago ? `<div class="hist-metodo">Pago: ${v.metodo_pago}</div>` : ''}
+      <table class="hist-tabla">
+        <thead><tr><th>Producto</th><th>Cant.</th><th>Precio</th><th>Subtotal</th></tr></thead>
+        <tbody>
+          ${(v.productos || []).map((p) => `
+            <tr><td>${p.nombre}</td><td>${p.cantidad}</td><td>${money(p.precio_unitario)}</td><td>${money(p.subtotal)}</td></tr>
+          `).join('')}
+        </tbody>
+      </table>
+      <div class="hist-total">Total: <b>${money(v.total)}</b></div>
+    </div>`).join('');
+  historialLista.querySelectorAll('.hist-x').forEach((b) => {
+    b.addEventListener('click', () => borrarHistorial(Number(b.dataset.id)));
+  });
+}
+
+async function borrarHistorial(id) {
+  if (!confirm('¿Borrar este registro del historial?\n\nNo devuelve la existencia ni anula la venta: solo lo quita de esta lista.')) return;
+  try {
+    await ventasHistorialBorrar(id);
+    await cargarHistorial();
+  } catch (e) {
+    alert('No se pudo borrar: ' + e.message);
+  }
+}
 
 cargar();

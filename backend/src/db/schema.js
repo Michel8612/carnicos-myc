@@ -420,6 +420,20 @@ CREATE TABLE IF NOT EXISTS licencia (
 -- agrega para instalaciones viejas, ahora sí con su REFERENCES porque
 -- en este punto "usuarios" ya existe seguro.
 ALTER TABLE almacenes ADD COLUMN IF NOT EXISTS usuario_id INTEGER REFERENCES usuarios(id);
+
+-- Imagen de recetas, productos y del inventario propio de ventas: se
+-- guarda como data URL (base64) en una columna TEXT; el frontend ya
+-- redimensiona la imagen antes de enviarla, así que no hace falta un
+-- storage externo.
+ALTER TABLE recetas ADD COLUMN IF NOT EXISTS imagen TEXT;
+ALTER TABLE productos ADD COLUMN IF NOT EXISTS imagen TEXT;
+ALTER TABLE venta_inventario ADD COLUMN IF NOT EXISTS imagen TEXT;
+
+-- Historial de ventas: se pueden ocultar de la vista (sin borrar el
+-- registro ni tocar inventario/caja/contabilidad) y se guarda cómo
+-- se cobró (efectivo, transferencia...).
+ALTER TABLE ventas ADD COLUMN IF NOT EXISTS oculto INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE ventas ADD COLUMN IF NOT EXISTS metodo_pago TEXT;
 `;
 
 export default SCHEMA_SQL;

@@ -49,7 +49,13 @@ async function apiFetch(ruta, opciones = {}) {
     if (!location.pathname.endsWith('index.html')) location.href = 'index.html';
     throw new Error(datos.error || 'Su sesión expiró.');
   }
-  if (!res.ok) throw new Error(datos.error || 'Algo salió mal. Intente de nuevo.');
+  if (!res.ok) {
+    const err = new Error(datos.error || 'Algo salió mal. Intente de nuevo.');
+    // Se adjunta el cuerpo completo del error (p.ej. { faltantes:[...] } al
+    // producir sin stock suficiente) sin romper a quien solo usa e.message.
+    err.data = datos;
+    throw err;
+  }
   return datos;
 }
 
@@ -73,6 +79,7 @@ function logout() { clearToken(); location.href = 'index.html'; }
 const ROL_ETIQUETA = {
   dueno: 'Dueño', admin: 'Dueño', proveedor: 'Soporte',
   cocinero: 'Cocinero', almacen: 'Almacén', almacenero: 'Almacén',
+  almacen_central: 'Almacenero Central',
   ventas: 'Ventas', contabilidad: 'Contabilidad',
 };
 function etiquetaRol(rol) { return ROL_ETIQUETA[rol] || rol || ''; }
@@ -82,6 +89,7 @@ const HOME_POR_ROL = {
   dueno: 'admin.html', admin: 'admin.html', proveedor: 'admin.html',
   cocinero: 'recetas.html',
   almacen: 'almacen.html', almacenero: 'almacen.html',
+  almacen_central: 'almacen.html',
   ventas: 'ventas.html',
   contabilidad: 'contabilidad.html',
 };

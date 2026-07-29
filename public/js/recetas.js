@@ -29,9 +29,65 @@ const compBody = document.getElementById('compBody');
 const recError = document.getElementById('recError');
 const nombreInput = document.getElementById('nombreReceta');
 const nombreEco = document.getElementById('nombreEco');
+const imgInput = document.getElementById('recetaImagenInput');
+const imgPreview = document.getElementById('recetaImagenPreview');
+const btnElegirImagen = document.getElementById('btnElegirImagen');
+const btnQuitarImagen = document.getElementById('btnQuitarImagen');
+
+// Imagen (data URL ya comprimida) de la receta que se está creando/editando.
+let imagenActual = null;
 
 // --- Utilidades ---
 const fmt = (n) => Number(n ?? 0).toLocaleString('es-CU', { maximumFractionDigits: 3 });
+
+// ------------------------------------------------------------
+//  Comprimir la foto EN EL NAVEGADOR antes de mandarla al backend.
+//  Se escala a un máximo de 400px de lado (mantiene proporción) y
+//  se exporta como JPEG al 70%: así no se manda una foto enorme a
+//  la base de datos.
+// ------------------------------------------------------------
+function comprimirImagen(file) {
+  return new Promise((resolve, reject) => {
+    const lector = new FileReader();
+    lector.onerror = () => reject(new Error('No se pudo leer la imagen.'));
+    lector.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('El archivo elegido no es una imagen válida.'));
+      img.onload = () => {
+        const MAX = 400;
+        let { width, height } = img;
+        if (width > height && width > MAX) {
+          height = Math.round(height * (MAX / width));
+          width = MAX;
+        } else if (height >= width && height > MAX) {
+          width = Math.round(width * (MAX / height));
+          height = MAX;
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.7));
+      };
+      img.src = lector.result;
+    };
+    lector.readAsDataURL(file);
+  });
+}
+
+// Muestra (o quita) la vista previa y guarda el data URL a enviar.
+function fijarImagenReceta(dataUrl) {
+  imagenActual = dataUrl || null;
+  if (imagenActual) {
+    imgPreview.src = imagenActual;
+    imgPreview.style.display = '';
+    btnQuitarImagen.style.display = '';
+  } else {
+    imgPreview.src = '';
+    imgPreview.style.display = 'none';
+    btnQuitarImagen.style.display = 'none';
+  }
+}
 
 // --- Cargar productos y recetas ---
 async function cargarTodo() {
@@ -58,12 +114,19 @@ async function cargarRecetas() {
     const chips = (r.ingredientes || [])
       .map((i) => `<span class="rec-chip">${i.producto_nombre}: ${fmt(i.cantidad)} ${i.unidad || ''}</span>`)
       .join('');
+    // Miniatura: si no tiene foto, un recuadro neutro discreto (no rompe la fila).
+    const miniatura = r.imagen
+      ? `<img src="${r.imagen}" class="rec-miniatura" alt="">`
+      : `<span class="rec-miniatura rec-miniatura-vacia"></span>`;
     li.innerHTML = `
       <div style="width:100%">
         <div class="rec-item-cab">
-          <div>
-            <strong>${r.nombre}</strong>
-            <div class="rec-sub">Rinde ${fmt(r.rinde_cantidad)} ${r.rinde_unidad || ''}</div>
+          <div style="display:flex;align-items:center;gap:10px;">
+            ${miniatura}
+            <div>
+              <strong>${r.nombre}</strong>
+              <div class="rec-sub">Rinde ${fmt(r.rinde_cantidad)} ${r.rinde_unidad || ''}</div>
+            </div>
           </div>
           <div class="acc">
             <button onclick="editarReceta(${r.id})">Editar</button>
@@ -98,6 +161,7 @@ function abrirModal(receta) {
   actualizarEco();
   document.getElementById('rindeCantidad').value = receta ? receta.rinde_cantidad : '';
   document.getElementById('rindeUnidad').value = (receta && receta.rinde_unidad) || 'lb';
+  fijarImagenReceta(receta && receta.imagen ? receta.imagen : null);
   compBody.innerHTML = '';
   if (receta && receta.ingredientes && receta.ingredientes.length) {
     receta.ingredientes.forEach((i) => filaComponente(i.producto_id, i.cantidad));
@@ -141,6 +205,7 @@ async function guardar() {
     rinde_cantidad: rinde,
     rinde_unidad: rindeUnidad,
     ingredientes,
+    imagen: imagenActual, // null si se quitó o nunca se puso
   };
 
   const btn = document.getElementById('btnGuardar');
@@ -177,6 +242,26 @@ document.getElementById('btnListaRecetas').addEventListener('click', () => {
 });
 nombreInput.addEventListener('input', actualizarEco);
 document.getElementById('btnAgregarComp').addEventListener('click', () => filaComponente());
+
+// ---- Elegir / quitar la foto de la receta ----
+if (btnElegirImagen && imgInput) {
+  btnElegirImagen.addEventListener('click', () => imgInput.click());
+  imgInput.addEventListener('change', async () => {
+    const file = imgInput.files && imgInput.files[0];
+    if (!file) return;
+    try {
+      const dataUrl = await comprimirImagen(file);
+      fijarImagenReceta(dataUrl);
+    } catch (e) {
+      mostrarError(e.message);
+    } finally {
+      imgInput.value = ''; // permite elegir el mismo archivo otra vez si hace falta
+    }
+  });
+}
+if (btnQuitarImagen) {
+  btnQuitarImagen.addEventListener('click', () => fijarImagenReceta(null));
+}
 
 // ---- Crear un componente nuevo sin salir de Recetas ----
 // El cocinero anota lo que lleva la receta aunque el almacén esté vacío.

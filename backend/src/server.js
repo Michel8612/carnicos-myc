@@ -89,7 +89,7 @@ if (existsSync(PUBLIC)) {
 app.use('/api/auth', authRoutes);
 // Control por rol: leer (GET) lo puede todo usuario con sesión; ESCRIBIR
 // (crear/editar/borrar) solo el dueño y el rol dueño de esa sección.
-app.use('/api/inventario', requiereSesion, escrituraSoloRoles('almacen', 'almacenero'), inventarioRoutes);
+app.use('/api/inventario', requiereSesion, escrituraSoloRoles('almacen', 'almacenero', 'almacen_central'), inventarioRoutes);
 app.use('/api/caja', cajaRoutes);
 app.use('/api/sync', syncRoutes);
 app.use('/api/usuarios', usuariosRoutes); // ya es solo-dueño por dentro
@@ -97,7 +97,7 @@ app.use('/api/produccion', requiereSesion, escrituraSoloRoles('cocinero'), produ
 app.use('/api/ventas', requiereSesion, escrituraSoloRoles('ventas'), ventasRoutes);
 app.use('/api/transporte', requiereSesion, escrituraSoloRoles('ventas'), transporteRoutes);
 app.use('/api/costos', requiereSesion, escrituraSoloRoles(), costosRoutes); // solo dueño escribe; contabilidad solo lee
-app.use('/api/ipv', requiereSesion, escrituraSoloRoles('almacen', 'almacenero'), ipvRoutes);
+app.use('/api/ipv', requiereSesion, escrituraSoloRoles('almacen', 'almacenero', 'almacen_central'), ipvRoutes);
 // 'almacen' se incluye aquí porque el almacenero necesita poder llamar a
 // POST /recetas/disponibles/:id/al-almacen (dar entrada a lo producido);
 // el propio archivo recetas.js restringe fino las demás rutas de cocina

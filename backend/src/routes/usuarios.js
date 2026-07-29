@@ -41,7 +41,10 @@ router.post('/', async (req, res) => {
     return res.status(400).json({ error: 'La clave temporal debe tener al menos 6 caracteres.' });
   }
   // Roles válidos del sistema. Si viene uno desconocido, cae a almacenero.
-  const ROLES_VALIDOS = ['dueno', 'cocinero', 'almacen', 'ventas', 'contabilidad'];
+  // 'almacen_central' es como un almacenero pero sin almacén propio: ve y
+  // mueve TODOS los almacenes (igual que el dueño), por eso NO entra en
+  // ES_ROL_ALMACEN ni recibe un "Almacén de <nombre>" automático.
+  const ROLES_VALIDOS = ['dueno', 'cocinero', 'almacen', 'almacen_central', 'ventas', 'contabilidad'];
   const rolFinal = ROLES_VALIDOS.includes(rol) ? rol : 'almacenero';
 
   const tomado = await db.prepare('SELECT 1 FROM usuarios WHERE usuario = ?').get(usuario);

@@ -13,6 +13,12 @@
     .acciones-top { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin:10px 0; }
     .btn-add-prod { background:#2196F3; color:#fff; border:none; padding:11px 18px; border-radius:8px; font-size:15px; cursor:pointer; }
     .btn-reiniciar { background:#e65100; color:#fff; border:none; padding:11px 18px; border-radius:8px; font-size:15px; cursor:pointer; }
+    /* Pestañas de vistas (Catálogo / Hoja del día / Historial) */
+    .tabs-ventas { display:flex; gap:8px; justify-content:center; flex-wrap:wrap; margin:14px 0; }
+    .tabs-ventas button { background:#fff; border:1px solid #cfd8dc; color:#37474f; padding:10px 18px; border-radius:20px; cursor:pointer; font-size:14px; font-weight:bold; }
+    .tabs-ventas button.tv-activo { background:#2196F3; color:#fff; border-color:#2196F3; }
+    .panel-vista { display:none; }
+    .panel-vista.activo { display:block; }
     /* Tarjetas de totales */
     .tarjetas { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin:16px 0; }
     .tarjeta { background:#fff; border-radius:12px; padding:14px; text-align:center; box-shadow:0 3px 10px rgba(0,0,0,.12); }
@@ -68,41 +74,89 @@
       </span>
     </div>
 
-    <div class="acciones-top">
-      <button class="btn-add-prod" id="btnAgregarProd">+ Agregar producto</button>
-      <button class="btn-reiniciar" id="btnReiniciar">Reiniciar jornada</button>
+    <div class="tabs-ventas" id="tabsVentas">
+      <button class="tv-activo" data-panel="pHoja">Hoja del día</button>
+      <button data-panel="pCatalogo">Catálogo</button>
+      <button data-panel="pHistorial">Historial</button>
     </div>
 
-    <div class="tarjetas">
-      <div class="tarjeta t-venta"><div class="n" id="tVenta">0.00</div><div class="l">Venta del día</div></div>
-      <div class="tarjeta t-costo"><div class="n" id="tCosto">0.00</div><div class="l">Costo de lo vendido</div></div>
-      <div class="tarjeta t-ganancia"><div class="n" id="tGanancia">0.00</div><div class="l">Ganancia del día</div></div>
-      <div class="tarjeta t-exist"><div class="n" id="tExist">0.00</div><div class="l">Valor de la existencia</div></div>
-    </div>
+    <!-- ===================== VISTA: HOJA DEL DÍA (la de siempre, intacta) ===================== -->
+    <section class="panel-vista activo" id="pHoja">
+      <div class="acciones-top">
+        <button class="btn-add-prod" id="btnAgregarProd">+ Agregar producto</button>
+        <button class="btn-reiniciar" id="btnReiniciar">Reiniciar jornada</button>
+      </div>
 
-    <div class="tabla-scroll">
-      <table class="hoja" id="tablaHoja" style="display:none;">
-        <thead>
-          <tr>
-            <th>Producto</th>
-            <th>Cantidad</th>
-            <th>Unidad</th>
-            <th>Costo unit.</th>
-            <th>Precio venta</th>
-            <th>Vendido</th>
-            <th>Total</th>
-            <th>Ganancia</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody id="hojaBody"></tbody>
-      </table>
-    </div>
-    <p class="ayuda">Los datos se guardan solos al salir de cada casilla. “Reiniciar jornada” descuenta lo vendido de la cantidad y lo envía a Contabilidad.</p>
+      <div class="tarjetas">
+        <div class="tarjeta t-venta"><div class="n" id="tVenta">0.00</div><div class="l">Venta del día</div></div>
+        <div class="tarjeta t-costo"><div class="n" id="tCosto">0.00</div><div class="l">Costo de lo vendido</div></div>
+        <div class="tarjeta t-ganancia"><div class="n" id="tGanancia">0.00</div><div class="l">Ganancia del día</div></div>
+        <div class="tarjeta t-exist"><div class="n" id="tExist">0.00</div><div class="l">Valor de la existencia</div></div>
+      </div>
 
-    <div id="vacioHoja" class="vacio-vta" style="display:none;">
-      Todavía no tiene productos. Use “+ Agregar producto” para armar su lista de venta.
-    </div>
+      <div class="tabla-scroll">
+        <table class="hoja" id="tablaHoja" style="display:none;">
+          <thead>
+            <tr>
+              <th>Producto</th>
+              <th>Cantidad</th>
+              <th>Unidad</th>
+              <th>Costo unit.</th>
+              <th>Precio venta</th>
+              <th>Vendido</th>
+              <th>Total</th>
+              <th>Ganancia</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="hojaBody"></tbody>
+        </table>
+      </div>
+      <p class="ayuda">Los datos se guardan solos al salir de cada casilla. “Reiniciar jornada” descuenta lo vendido de la cantidad y lo envía a Contabilidad.</p>
+
+      <div id="vacioHoja" class="vacio-vta" style="display:none;">
+        Todavía no tiene productos. Use “+ Agregar producto” para armar su lista de venta.
+      </div>
+    </section>
+
+    <!-- ===================== VISTA: CATÁLOGO + CARRITO ===================== -->
+    <section class="panel-vista" id="pCatalogo">
+      <div class="catalogo-layout">
+        <div class="catalogo-col">
+          <div class="catalogo-grid" id="catalogoGrid"></div>
+          <div class="vacio-vta" id="catalogoVacio" style="display:none;">
+            No hay productos con existencia disponible para vender.
+          </div>
+        </div>
+
+        <div class="carrito-col">
+          <div class="carrito-caja">
+            <h3 class="carrito-titulo">Carrito</h3>
+            <div class="carrito-lista" id="carritoLista"></div>
+            <div class="carrito-vacio" id="carritoVacio">
+              El carrito está vacío. Toque un producto del catálogo para agregarlo.
+            </div>
+            <div class="carrito-aviso" id="carritoAviso"></div>
+            <div class="carrito-total-fila">
+              <span>Total</span>
+              <b id="carritoTotal">0.00</b>
+            </div>
+            <div class="carrito-acciones">
+              <button class="btn-carrito-cancelar" id="btnCarritoCancelar">Cancelar</button>
+              <button class="btn-carrito-pagar" id="btnCarritoPagar">Pagar</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== VISTA: HISTORIAL ===================== -->
+    <section class="panel-vista" id="pHistorial">
+      <div class="historial-lista" id="historialLista"></div>
+      <div id="historialVacio" class="vacio-vta" style="display:none;">
+        Todavía no hay ventas registradas.
+      </div>
+    </section>
   </main>
 
   <!-- Popup: agregar producto -->
@@ -142,6 +196,26 @@
       <div class="modal-acc">
         <button class="b-cancelar" id="mpCancelar">Cancelar</button>
         <button class="b-guardar" id="mpGuardar">Agregar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Popup: confirmar pago del carrito -->
+  <div class="modal-fondo" id="modalPago">
+    <div class="modal-caja">
+      <h2>Confirmar venta</h2>
+      <label>Cliente (opcional)</label>
+      <input type="text" id="pgCliente" placeholder="Nombre del cliente">
+      <label>Método de pago</label>
+      <select id="pgMetodo">
+        <option value="Efectivo">Efectivo</option>
+        <option value="Transferencia">Transferencia</option>
+        <option value="Otro">Otro</option>
+      </select>
+      <p class="modal-err" id="pgError"></p>
+      <div class="modal-acc">
+        <button class="b-cancelar" id="pgCancelar">Cancelar</button>
+        <button class="b-guardar" id="pgConfirmar">Confirmar y cobrar</button>
       </div>
     </div>
   </div>

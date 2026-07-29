@@ -16,14 +16,21 @@ router.use(requiereSesion);
 
 // Un usuario de rol 'almacen' solo ve y mueve SU PROPIO almacén (el
 // que tiene asignado en usuarios.almacen_id). El dueño (y roles admin/
-// proveedor) ven y mueven todos. Esta función devuelve el almacen_id
-// al que hay que limitar las consultas, o null si no hay límite.
+// proveedor) ven y mueven todos. 'almacen_central' es un almacenero SIN
+// almacén propio: ve y mueve TODOS los almacenes, igual que el dueño.
+// Esta es la única función que decide el límite, para que la excepción
+// de almacen_central quede en un solo lugar (GET /existencias,
+// GET /almacenes y POST /movimientos ya la usan a través de ella).
+const ES_ALMACENERO_LIMITADO = (rol) => rol === 'almacen' || rol === 'almacenero';
+
+// Devuelve el almacen_id al que hay que limitar las consultas, o null
+// si no hay límite (dueño / admin / proveedor / almacen_central / etc.).
 function almacenDeLaSesion(req) {
   const rol = req.usuario.rol;
-  if (rol === 'almacen' || rol === 'almacenero') {
+  if (ES_ALMACENERO_LIMITADO(rol)) {
     return req.usuario.almacen_id || null;
   }
-  return null; // dueño / admin / proveedor / otros roles: sin límite
+  return null;
 }
 
 // ---------- Productos ----------
@@ -97,7 +104,7 @@ router.get('/existencias', async (req, res) => {
   const almacenId = almacenDeLaSesion(req);
 
   const stock = await db.prepare(`
-    SELECT p.id, p.nombre, p.stock_minimo, p.tipo, p.unidad_id,
+    SELECT p.id, p.nombre, p.stock_minimo, p.tipo, p.unidad_id, p.imagen,
            p.precio_costo, p.precio_venta, u.abreviatura AS unidad,
            COALESCE(SUM(e.cantidad), 0) AS cantidad
     FROM productos p

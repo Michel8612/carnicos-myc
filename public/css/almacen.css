@@ -122,6 +122,20 @@ h1, h2 {
   font-weight: bold;
 }
 
+/* Miniatura de producto en la tabla de existencias (mismo estilo que en Recetas) */
+.rec-miniatura {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  object-fit: cover;
+  flex-shrink: 0;
+  display: inline-block;
+}
+.rec-miniatura-vacia {
+  background: #cfd8dc;
+  border: 1px dashed #90a4ae;
+}
+
 /* Responsive */
 @media (max-width: 600px) {
   #productoForm input,
