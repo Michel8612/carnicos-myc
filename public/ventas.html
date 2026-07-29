@@ -129,10 +129,26 @@
           </div>
         </div>
 
-        <div class="carrito-col">
-          <div class="carrito-caja">
-            <h3 class="carrito-titulo">Carrito</h3>
-            <div class="carrito-lista" id="carritoLista"></div>
+      </div>
+
+      <!-- Botón flotante que abre el carrito (icono clásico de tienda) -->
+      <button class="btn-carrito-flotante" id="btnAbrirCarrito" title="Ver el carrito" aria-label="Ver el carrito">
+        <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="9" cy="21" r="1.6"></circle>
+          <circle cx="18" cy="21" r="1.6"></circle>
+          <path d="M1 1h3.2l2.5 12.4a2 2 0 0 0 2 1.6h8.9a2 2 0 0 0 2-1.6L21.5 6H5.4"></path>
+        </svg>
+        <span class="carrito-contador oculto" id="carritoContador">0</span>
+      </button>
+
+      <!-- Panel del carrito: mismo contenido de siempre, ahora dentro del catálogo -->
+      <div class="carrito-fondo" id="carritoFondo">
+        <div class="carrito-caja">
+          <h3 class="carrito-titulo">
+            Carrito
+            <button class="carrito-cerrar" id="btnCerrarCarrito" title="Cerrar" aria-label="Cerrar">&times;</button>
+          </h3>
+          <div class="carrito-lista" id="carritoLista"></div>
             <div class="carrito-vacio" id="carritoVacio">
               El carrito está vacío. Toque un producto del catálogo para agregarlo.
             </div>
@@ -144,7 +160,6 @@
             <div class="carrito-acciones">
               <button class="btn-carrito-cancelar" id="btnCarritoCancelar">Cancelar</button>
               <button class="btn-carrito-pagar" id="btnCarritoPagar">Pagar</button>
-            </div>
           </div>
         </div>
       </div>

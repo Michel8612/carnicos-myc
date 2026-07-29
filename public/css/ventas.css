@@ -144,9 +144,10 @@ h1, h2 {
 /* ============================================================
    Vista Catálogo + Carrito (venta rápida por tarjetas)
    ============================================================ */
+/* El carrito ya no ocupa columna: el catálogo usa todo el ancho */
 .catalogo-layout {
   display: grid;
-  grid-template-columns: 2fr 1fr;
+  grid-template-columns: 1fr;
   gap: 18px;
   align-items: start;
 }
@@ -193,12 +194,83 @@ h1, h2 {
 .cat-precio { color: #2196F3; font-weight: bold; font-size: 15px; margin-top: 2px; }
 .cat-exist { color: #777; font-size: 11.5px; margin-top: 2px; }
 
+/* Botón flotante del carrito (esquina inferior derecha del catálogo).
+   Va dentro de #pCatalogo: si la pestaña no está activa, no se ve. */
+.btn-carrito-flotante {
+  position: fixed;
+  right: 8px;      /* alineado con el botón de sonido de sonidos.js */
+  bottom: 70px;    /* justo encima de él, para que no se tapen */
+  z-index: 40;
+  width: 56px;
+  height: 56px;
+  border: none;
+  border-radius: 50%;
+  background: #e65100;
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 5px 16px rgba(0,0,0,.3);
+  transition: transform .15s ease, background .15s ease;
+}
+.btn-carrito-flotante:hover { background: #ef6c00; transform: translateY(-2px); }
+.btn-carrito-flotante:active { transform: scale(.94); }
+
+/* Globito con la cantidad de productos; se oculta si el carrito está vacío */
+.carrito-contador {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 5px;
+  border-radius: 11px;
+  background: #2196F3;
+  color: #fff;
+  font-size: 12px;
+  font-weight: bold;
+  line-height: 22px;
+  text-align: center;
+  box-shadow: 0 2px 6px rgba(0,0,0,.3);
+}
+.carrito-contador.oculto { display: none; }
+
+/* Fondo oscuro del panel del carrito (mismo patrón que los popups) */
+.carrito-fondo {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.45);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 60;
+}
+.carrito-fondo.abierto { display: flex; }
+
+.carrito-cerrar {
+  float: right;
+  background: none;
+  border: none;
+  color: #777;
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.carrito-cerrar:hover { color: #c62828; }
+
 /* Carrito */
 .carrito-caja {
   background: #fff;
   border-radius: 12px;
   padding: 16px;
   box-shadow: 0 3px 10px rgba(0,0,0,.12);
+  width: 100%;
+  max-width: 420px;
+  max-height: 92vh;
+  overflow: auto;
 }
 .carrito-titulo { margin: 0 0 10px; color: #e65100; }
 

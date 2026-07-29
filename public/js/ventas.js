@@ -261,9 +261,27 @@ const carritoLista = document.getElementById('carritoLista');
 const carritoVacio = document.getElementById('carritoVacio');
 const carritoTotalEl = document.getElementById('carritoTotal');
 const carritoAviso = document.getElementById('carritoAviso');
+const carritoFondo = document.getElementById('carritoFondo');
+const carritoContador = document.getElementById('carritoContador');
+
+// El carrito ahora vive dentro del catálogo: se abre con el botón del icono.
+function abrirCarrito() { carritoFondo.classList.add('abierto'); }
+function cerrarCarrito() { carritoFondo.classList.remove('abierto'); }
+
+// El globito del botón muestra cuántas unidades hay; si no hay nada, se esconde.
+function actualizarContadorCarrito() {
+  const unidades = carrito.reduce((s, l) => s + l.cantidad, 0);
+  carritoContador.textContent = unidades;
+  carritoContador.classList.toggle('oculto', unidades === 0);
+}
+
+document.getElementById('btnAbrirCarrito').addEventListener('click', abrirCarrito);
+document.getElementById('btnCerrarCarrito').addEventListener('click', cerrarCarrito);
+carritoFondo.addEventListener('click', (e) => { if (e.target === carritoFondo) cerrarCarrito(); });
 let avisoTimeout = null;
 
 function avisarCarrito(msg) {
+  abrirCarrito(); // el aviso se ve dentro del panel: hay que mostrarlo
   carritoAviso.textContent = msg;
   carritoAviso.classList.add('mostrar');
   clearTimeout(avisoTimeout);
@@ -312,6 +330,7 @@ function cambiarCantidadCarrito(id, delta) {
 }
 
 function renderCarrito() {
+  actualizarContadorCarrito();
   if (!carrito.length) {
     carritoLista.innerHTML = '';
     carritoVacio.style.display = 'block';
@@ -378,6 +397,7 @@ document.getElementById('pgConfirmar').addEventListener('click', async () => {
   try {
     const r = await ventasCarrito(body);
     cerrarModalPago();
+    cerrarCarrito(); // ya se cobró: se cierra el panel para volver al catálogo
     carrito = [];
     renderCarrito();
     await cargar(); // refresca existencia y totales con lo recién vendido
