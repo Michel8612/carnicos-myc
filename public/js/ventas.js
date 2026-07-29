@@ -29,6 +29,26 @@ const mpError = document.getElementById('mpError');
 const money = (n) => Number(n ?? 0).toLocaleString('es-CU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 // ------------------------------------------------------------
+// Tasa de cambio (USD/CUP): el CUP siempre manda, el USD solo se
+// muestra debajo, más chico. Si no hay tasa disponible (sin token,
+// sin conexión, sin tasa manual fijada), simplemente no se muestra.
+// ------------------------------------------------------------
+const tasasEtiquetaEl = document.getElementById('tasasEtiqueta');
+
+function actualizarEtiquetaTasas() {
+  if (!tasasEtiquetaEl) return;
+  tasasEtiquetaEl.textContent = Tasas.etiqueta();
+}
+
+// Construye el HTML de la línea "USD x.xx · venta USD x.xx" para un
+// precio en CUP, o cadena vacía si la tasa no está disponible.
+function lineaUsd(precioCup) {
+  const c = Tasas.convertir(precioCup);
+  if (!c) return '';
+  return `<div class="cat-precio-usd">USD ${money(c.usd)} · venta USD ${money(c.usdVenta)}</div>`;
+}
+
+// ------------------------------------------------------------
 // Endpoints nuevos (carrito de venta e historial). Todavía no están
 // en api.js (lo edita otro agente), así que los definimos aquí mismo
 // reutilizando apiFetch(), la misma función global que usa api.js
@@ -247,6 +267,7 @@ function renderCatalogo() {
       </div>
       <div class="cat-nombre">${p.nombre}</div>
       <div class="cat-precio">${money(p.precio_venta)}</div>
+      ${lineaUsd(p.precio_venta)}
       <div class="cat-exist">Existencia: ${p.cantidad} ${p.unidad}</div>
     </div>`).join('');
   catalogoGrid.querySelectorAll('.cat-tarjeta').forEach((el) => {
@@ -263,6 +284,7 @@ const carritoTotalEl = document.getElementById('carritoTotal');
 const carritoAviso = document.getElementById('carritoAviso');
 const carritoFondo = document.getElementById('carritoFondo');
 const carritoContador = document.getElementById('carritoContador');
+const carritoTotalUsdEl = document.getElementById('carritoTotalUsd');
 
 // El carrito ahora vive dentro del catálogo: se abre con el botón del icono.
 function abrirCarrito() { carritoFondo.classList.add('abierto'); }
@@ -335,6 +357,7 @@ function renderCarrito() {
     carritoLista.innerHTML = '';
     carritoVacio.style.display = 'block';
     carritoTotalEl.textContent = money(0);
+    if (carritoTotalUsdEl) carritoTotalUsdEl.innerHTML = '';
     return;
   }
   carritoVacio.style.display = 'none';
@@ -355,6 +378,10 @@ function renderCarrito() {
       </div>`;
   }).join('');
   carritoTotalEl.textContent = money(total);
+  if (carritoTotalUsdEl) {
+    const c = Tasas.convertir(total);
+    carritoTotalUsdEl.innerHTML = c ? `USD ${money(c.usd)} · venta USD ${money(c.usdVenta)}` : '';
+  }
   carritoLista.querySelectorAll('.cl-menos').forEach((b) => b.addEventListener('click', () => cambiarCantidadCarrito(Number(b.dataset.id), -1)));
   carritoLista.querySelectorAll('.cl-mas').forEach((b) => b.addEventListener('click', () => cambiarCantidadCarrito(Number(b.dataset.id), 1)));
 }
@@ -470,4 +497,12 @@ async function borrarHistorial(id) {
   }
 }
 
+// La tasa se carga en paralelo con la hoja de ventas (una sola vez por
+// página). Cuando llega, se refresca lo que ya esté pintado para que
+// aparezca el USD debajo del CUP sin bloquear la carga inicial.
+Tasas.cargar().then(() => {
+  actualizarEtiquetaTasas();
+  renderCatalogo();
+  renderCarrito();
+});
 cargar();

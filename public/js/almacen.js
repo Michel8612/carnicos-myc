@@ -69,14 +69,47 @@ productoForm.addEventListener('submit', (e) => {
 });
 
 // El destino solo tiene sentido cuando se da SALIDA: se muestra u oculta.
+// Cada vez que se abre (se pasa a "salida") se recarga la lista de
+// destinos en vivo, para que salgan almacenes/vendedores creados después.
 const tipoMovSelect = document.getElementById('movTipo');
 const bloqueDestino = document.getElementById('bloqueDestino');
 if (tipoMovSelect && bloqueDestino) {
+  const bloqueCompra = document.getElementById('bloqueCompra');
   const refrescarDestino = () => {
-    bloqueDestino.classList.toggle('hidden', tipoMovSelect.value !== 'salida');
+    const esSalida = tipoMovSelect.value === 'salida';
+    bloqueDestino.classList.toggle('hidden', !esSalida);
+    // Proveedor y costo solo tienen sentido cuando ENTRA mercancía.
+    if (bloqueCompra) bloqueCompra.classList.toggle('hidden', tipoMovSelect.value !== 'entrada');
+    if (esSalida) cargarDestinos();
   };
   tipoMovSelect.addEventListener('change', refrescarDestino);
   refrescarDestino();
+}
+
+// Cargar los destinos posibles (almacenes + vendedores) en el select,
+// agrupados por optgroup. El value de cada opción va como "tipo:id"
+// (ej. "almacen:3" o "ventas:7") para poder partirlo al enviar.
+function cargarDestinos() {
+  const destino = document.getElementById('movDestinoAlmacen');
+  if (!destino) return;
+  return API.destinosTransferencia().then((resp) => {
+    const destinos = (resp && resp.destinos) || [];
+    const almacenes = destinos.filter((d) => d.tipo === 'almacen');
+    const vendedores = destinos.filter((d) => d.tipo === 'ventas');
+
+    let html = '<option value="">¿A dónde va? (opcional)</option>';
+    if (almacenes.length) {
+      html += '<optgroup label="Almacenes">' +
+        almacenes.map((a) => `<option value="almacen:${a.id}">${a.nombre}</option>`).join('') +
+        '</optgroup>';
+    }
+    if (vendedores.length) {
+      html += '<optgroup label="Vendedores">' +
+        vendedores.map((v) => `<option value="ventas:${v.id}">${v.nombre}</option>`).join('') +
+        '</optgroup>';
+    }
+    destino.innerHTML = html;
+  }).catch((error) => console.error('Error al cargar destinos:', error));
 }
 
 // Registrar movimiento (entrada/salida)
@@ -92,12 +125,26 @@ movimientoForm.addEventListener('submit', (e) => {
     nota: document.getElementById('movNota').value.trim() || undefined,
   };
 
-  // A dónde va lo que sale (opcional): otro almacén, o un lugar escrito.
+  // A dónde va lo que sale (opcional): un almacén/vendedor (queda en
+  // tránsito hasta que lo acepten), o un lugar libre escrito (solo nota).
   if (tipo === 'salida') {
-    const destAlm = document.getElementById('movDestinoAlmacen');
+    const destSel = document.getElementById('movDestinoAlmacen');
     const destTxt = document.getElementById('movDestinoTexto');
-    if (destAlm && destAlm.value) datos.destino_almacen_id = Number(destAlm.value);
+    if (destSel && destSel.value) {
+      const [destinoTipo, destinoId] = destSel.value.split(':');
+      datos.destino_tipo = destinoTipo;
+      datos.destino_id = Number(destinoId);
+    }
     if (destTxt && destTxt.value.trim()) datos.destino_texto = destTxt.value.trim();
+  }
+
+  // Si la entrada fue una compra, se manda el proveedor (y el costo si
+  // se indicó) para dejar rastro en la tabla de compras. Todo opcional.
+  if (tipo === 'entrada') {
+    const prov = document.getElementById('movProveedor');
+    const costo = document.getElementById('movCostoUnitario');
+    if (prov && prov.value.trim()) datos.proveedor = prov.value.trim();
+    if (costo && parseFloat(costo.value) > 0) datos.costo_unitario = parseFloat(costo.value);
   }
 
   if (!datos.producto_id || !datos.almacen_id || !datos.cantidad) {
@@ -109,6 +156,8 @@ movimientoForm.addEventListener('submit', (e) => {
     .then(() => {
       movimientoForm.reset();
       if (bloqueDestino) bloqueDestino.classList.add('hidden');
+      const bc = document.getElementById('bloqueCompra');
+      if (bc) bc.classList.add('hidden');
       cargarTodo();
     })
     .catch((error) => {
@@ -116,6 +165,98 @@ movimientoForm.addEventListener('submit', (e) => {
       alert('Error: ' + error.message);
     });
 });
+
+// ============================================================
+//  Bandeja de recepción: transferencias pendientes dirigidas a
+//  este usuario (su almacén, o él mismo como vendedor).
+// ============================================================
+function fechaCorta(f) {
+  if (!f) return '';
+  const d = new Date(f);
+  return d.toLocaleDateString('es-CU', { day: '2-digit', month: '2-digit' }) + ' ' +
+    d.toLocaleTimeString('es-CU', { hour: '2-digit', minute: '2-digit' });
+}
+
+async function cargarBandejaRecepcion() {
+  const aviso = document.getElementById('avisoPendientes');
+  const bloque = document.getElementById('bandejaRecepcion');
+  const lista = document.getElementById('bandejaLista');
+  if (!bloque || !lista) return;
+
+  let pendientes = [];
+  try { pendientes = await API.transferenciasPendientes(); } catch (e) { pendientes = []; }
+
+  if (!pendientes.length) {
+    bloque.classList.add('hidden');
+    if (aviso) aviso.classList.add('hidden');
+    return;
+  }
+
+  if (aviso) {
+    aviso.classList.remove('hidden');
+    aviso.textContent = pendientes.length === 1
+      ? 'Tiene 1 entrada por recibir'
+      : `Tiene ${pendientes.length} entradas por recibir`;
+  }
+
+  bloque.classList.remove('hidden');
+  lista.innerHTML = pendientes.map((t) => `
+    <div class="tarjeta-pendiente">
+      <div class="tarjeta-pendiente-info">
+        <b>${t.producto_nombre || 'Producto'}</b>
+        — ${Number(t.cantidad).toLocaleString('es-CU', { maximumFractionDigits: 3 })}
+        <br>
+        <span class="tarjeta-pendiente-detalle">
+          Envía: ${t.enviado_nombre || 'alguien'} · Desde: ${t.origen_almacen_nombre || '—'} · ${fechaCorta(t.fecha_envio)}
+        </span>
+      </div>
+      <div class="tarjeta-pendiente-botones">
+        <button class="btn-aceptar" onclick="resolverTransferencia(${t.id}, 'aceptar')">Aceptar entrada</button>
+        <button class="btn-cancelar" onclick="resolverTransferencia(${t.id}, 'cancelar')">Cancelar recepción</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function resolverTransferencia(id, accion) {
+  if (accion === 'cancelar' && !confirm('¿Cancelar esta recepción? La mercancía volverá al almacén de origen.')) return;
+  try {
+    if (accion === 'aceptar') await API.aceptarTransferencia(id);
+    else await API.cancelarTransferencia(id);
+    await cargarTodo();
+  } catch (e) {
+    alert('No se pudo resolver la transferencia: ' + e.message);
+  }
+}
+
+// ============================================================
+//  Historial de transferencias (estado: pendiente/aceptada/cancelada)
+// ============================================================
+const ESTADO_LABEL = { pendiente: 'Pendiente', aceptada: 'Aceptada', cancelada: 'Cancelada' };
+
+async function cargarHistorialTransferencias() {
+  const cuerpo = document.getElementById('historialTransferenciasList');
+  if (!cuerpo) return;
+
+  let filas = [];
+  try { filas = await API.transferenciasHistorial(); } catch (e) { filas = []; }
+
+  if (!filas.length) {
+    cuerpo.innerHTML = '<tr><td colspan="7" style="color:#888;">Sin transferencias registradas.</td></tr>';
+    return;
+  }
+
+  cuerpo.innerHTML = filas.map((t) => `
+    <tr>
+      <td>${t.producto_nombre || ''}</td>
+      <td>${Number(t.cantidad).toLocaleString('es-CU', { maximumFractionDigits: 3 })}</td>
+      <td>${t.origen_almacen_nombre || ''}</td>
+      <td>${t.destino_nombre || ''}</td>
+      <td>${t.enviado_nombre || ''}</td>
+      <td>${fechaCorta(t.fecha_envio)}</td>
+      <td><span class="estado-transf estado-${t.estado}">${ESTADO_LABEL[t.estado] || t.estado}</span></td>
+    </tr>`).join('');
+}
 
 // ============================================================
 //  Lo que la cocina produjo, esperando entrada al almacén
@@ -173,25 +314,15 @@ function cargarUnidades() {
   }).catch((error) => console.error('Error al cargar unidades:', error));
 }
 
-// Cargar almacenes (para el selector de movimiento y el contador)
+// Cargar almacenes (para el selector de movimiento y el contador).
+// El selector de DESTINO (almacenes + vendedores) se llena aparte con
+// cargarDestinos(), cada vez que se abre el bloque de destino.
 function cargarAlmacenes() {
-  return API.almacenes().then(async (almacenes) => {
+  return API.almacenes().then((almacenes) => {
     movAlmacenSelect.innerHTML = (almacenes || [])
       .map((a) => `<option value="${a.id}">${a.nombre}</option>`)
       .join('');
     contadorAlmacenes.textContent = `${(almacenes || []).length} almacenes`;
-
-    // Para enviar mercancía a otro sitio hace falta ver TODOS los almacenes,
-    // no solo el propio (un almacenero solo ve el suyo en la lista de arriba).
-    const destino = document.getElementById('movDestinoAlmacen');
-    if (destino) {
-      let todos = almacenes || [];
-      try { todos = await API.almacenesTodos(); } catch (e) { /* se queda con los suyos */ }
-      const propio = Number(movAlmacenSelect.value);
-      destino.innerHTML = '<option value="">¿A dónde va? (opcional)</option>' +
-        todos.filter((a) => a.id !== propio)
-          .map((a) => `<option value="${a.id}">${a.nombre}</option>`).join('');
-    }
     return almacenes;
   }).catch((error) => console.error('Error al cargar almacenes:', error));
 }
@@ -262,6 +393,8 @@ function cargarTodo() {
   cargarProductosSelect();
   cargarAlmacenes();
   cargarProducido();   // lo que la cocina dejó listo para entrar
+  cargarBandejaRecepcion();       // transferencias pendientes por recibir
+  cargarHistorialTransferencias(); // historial de lo enviado
 }
 
 // Carga inicial

@@ -39,6 +39,7 @@ import ipvRoutes from './routes/ipv.js';
 import recetasRoutes from './routes/recetas.js';
 import contabilidadRoutes from './routes/contabilidad.js';
 import configRoutes from './routes/config.js';
+import tasasRoutes from './routes/tasas.js';
 import licenciaRoutes, { bloqueoPorLicencia } from './licencia/rutas.js';
 import { inicializarLicencia } from './licencia/licencia.js';
 import { requiereSesion, escrituraSoloRoles } from './middleware/auth.js';
@@ -89,7 +90,16 @@ if (existsSync(PUBLIC)) {
 app.use('/api/auth', authRoutes);
 // Control por rol: leer (GET) lo puede todo usuario con sesión; ESCRIBIR
 // (crear/editar/borrar) solo el dueño y el rol dueño de esa sección.
-app.use('/api/inventario', requiereSesion, escrituraSoloRoles('almacen', 'almacenero', 'almacen_central'), inventarioRoutes);
+// El vendedor al que le mandan mercancía tiene que poder aceptarla o
+// cancelarla, pero SIN darle permiso de escritura sobre el resto del
+// almacén. Por eso esas dos rutas se dejan pasar aquí y el control fino
+// (¿es de verdad el destinatario?) lo hace inventario.js por dentro.
+const RESOLVER_TRANSFERENCIA = /^\/transferencias\/\d+\/(aceptar|cancelar)$/;
+const permisoInventario = escrituraSoloRoles('almacen', 'almacenero', 'almacen_central');
+app.use('/api/inventario', requiereSesion, (req, res, next) => {
+  if (RESOLVER_TRANSFERENCIA.test(req.path)) return next();
+  return permisoInventario(req, res, next);
+}, inventarioRoutes);
 app.use('/api/caja', cajaRoutes);
 app.use('/api/sync', syncRoutes);
 app.use('/api/usuarios', usuariosRoutes); // ya es solo-dueño por dentro
@@ -104,6 +114,9 @@ app.use('/api/ipv', requiereSesion, escrituraSoloRoles('almacen', 'almacenero', 
 // (crear/editar/borrar receta, producir) a cocinero/dueño solamente.
 app.use('/api/recetas', requiereSesion, escrituraSoloRoles('cocinero', 'almacen', 'almacenero'), recetasRoutes);
 app.use('/api/contabilidad', contabilidadRoutes);
+// Tasa del dólar (elTOQUE): leerla puede cualquiera con sesión; fijarla
+// a mano o forzar la actualización, solo el dueño.
+app.use('/api/tasas', requiereSesion, escrituraSoloRoles(), tasasRoutes);
 
 // ---- Middleware de errores: cualquier fallo en una ruta cae aquí ----
 // Devuelve un JSON claro con 500 en vez de tumbar el servidor.

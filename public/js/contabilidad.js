@@ -42,6 +42,9 @@ document.querySelectorAll('.tabs button').forEach((b) => {
     document.getElementById(b.dataset.panel).classList.add('activo');
     if (b.dataset.panel === 'pLibro') cargarLibro();
     if (b.dataset.panel === 'pMovs') cargarMovimientos();
+    if (b.dataset.panel === 'pGastos') cargarGastos();
+    if (b.dataset.panel === 'pNomina') cargarNomina();
+    if (b.dataset.panel === 'pTributacion') cargarTributacion();
   });
 });
 
@@ -191,6 +194,253 @@ document.getElementById('btnActualizar').addEventListener('click', (e) => {
   cargarResumen();
   if (document.getElementById('pLibro').classList.contains('activo')) cargarLibro();
   if (document.getElementById('pMovs').classList.contains('activo')) cargarMovimientos();
+  if (document.getElementById('pGastos').classList.contains('activo')) cargarGastos();
+  if (document.getElementById('pNomina').classList.contains('activo')) cargarNomina();
+  if (document.getElementById('pTributacion').classList.contains('activo')) cargarTributacion();
 });
+
+// ---------- Gastos ----------
+const mesActual = () => new Date().toISOString().slice(0, 7); // AAAA-MM, para <input type="month">
+
+let categoriasGastoCache = null; // se pinta una sola vez, viene del backend
+
+// Pinta las tarjetas de "total por moneda" que devuelven /costos/gastos y
+// /costos/nomina. Nunca se suman monedas distintas: cada una su tarjeta.
+function pintarTotalesPorMoneda(contenedorId, porMoneda, etiquetaCampo) {
+  const cont = document.getElementById(contenedorId);
+  cont.innerHTML = porMoneda.length
+    ? porMoneda.map((f) => `
+      <div class="tarjeta c-naranja">
+        <div class="n">${money(f.total)} ${esc(f.moneda)}</div>
+        <div class="l">${etiquetaCampo} (${f.cantidad} ${f.cantidad === 1 ? 'registro' : 'registros'})</div>
+      </div>`).join('')
+    : '<p class="sub">Nada registrado todavía en este período.</p>';
+}
+
+async function cargarCategoriasGasto() {
+  if (categoriasGastoCache) return categoriasGastoCache;
+  try { categoriasGastoCache = await API.categoriasGasto(); }
+  catch (e) { categoriasGastoCache = []; }
+  const sel = document.getElementById('gCategoria');
+  sel.innerHTML = categoriasGastoCache.map((c) => `<option value="${esc(c.clave)}">${esc(c.etiqueta)}</option>`).join('');
+  return categoriasGastoCache;
+}
+
+async function cargarGastos() {
+  await cargarCategoriasGasto();
+  const mesInput = document.getElementById('gMes');
+  if (!mesInput.value) mesInput.value = mesActual();
+  const mes = mesInput.value;
+
+  let d;
+  try { d = await API.gastos(mes); }
+  catch (e) { alert('No se pudieron cargar los gastos: ' + e.message); return; }
+
+  pintarTotalesPorMoneda('gTotalesPorMoneda', d.por_moneda, 'Total gastado');
+
+  const tb = document.getElementById('tbGastos');
+  tb.innerHTML = d.filas.length
+    ? d.filas.map((f) => `
+      <tr>
+        <td>${fechaHora(f.fecha)}</td>
+        <td class="izq">${esc((categoriasGastoCache.find((c) => c.clave === f.categoria) || {}).etiqueta || f.categoria)}</td>
+        <td class="izq">${esc(f.concepto)}</td>
+        <td>${money(f.monto)}</td>
+        <td>${esc(f.moneda)}</td>
+        <td class="izq">${esc(f.nota || '')}</td>
+      </tr>`).join('')
+    : '<tr><td colspan="6" class="vacio">No hay gastos registrados en este mes.</td></tr>';
+}
+
+document.getElementById('btnVerGastos').addEventListener('click', cargarGastos);
+
+document.getElementById('btnRegistrarGasto').addEventListener('click', async () => {
+  const d = {
+    categoria: document.getElementById('gCategoria').value,
+    concepto: document.getElementById('gConcepto').value.trim(),
+    monto: Number(document.getElementById('gMonto').value),
+    moneda: document.getElementById('gMoneda').value,
+    nota: document.getElementById('gNota').value.trim() || null,
+  };
+  if (!d.concepto || !d.monto || d.monto <= 0) {
+    alert('Indique concepto y un monto mayor que cero.');
+    return;
+  }
+  try {
+    await API.crearGasto(d);
+    document.getElementById('gConcepto').value = '';
+    document.getElementById('gMonto').value = '';
+    document.getElementById('gNota').value = '';
+    await cargarGastos();
+    await cargarResumen();
+  } catch (e) { alert('No se pudo registrar el gasto: ' + e.message); }
+});
+
+document.getElementById('btnActualizarTasa').addEventListener('click', async () => {
+  const p = document.getElementById('gTasaResultado');
+  p.textContent = 'Actualizando...';
+  try {
+    const r = await API.actualizarTasa();
+    const partes = [];
+    if (r.tasa != null) partes.push(`Tasa: ${r.tasa}`);
+    if (r.fuente) partes.push(`Fuente: ${r.fuente}`);
+    if (r.fecha) partes.push(`Fecha: ${r.fecha}`);
+    if (r.pendiente) partes.push('Quedó pendiente (no se pudo confirmar del todo).');
+    p.textContent = partes.length ? partes.join(' · ') : 'Tasa actualizada.';
+  } catch (e) {
+    p.textContent = 'No se pudo actualizar la tasa: ' + e.message;
+  }
+});
+
+// ---------- Nómina ----------
+async function cargarNomina() {
+  const inputVer = document.getElementById('nPeriodoVer');
+  if (!inputVer.value) inputVer.value = mesActual();
+  const periodo = inputVer.value;
+
+  let d;
+  try { d = await API.nomina(periodo); }
+  catch (e) { alert('No se pudo cargar la nómina: ' + e.message); return; }
+
+  pintarTotalesPorMoneda('nTotalesPorMoneda', d.por_moneda, 'Total nómina');
+
+  const tb = document.getElementById('tbNomina');
+  tb.innerHTML = d.filas.length
+    ? d.filas.map((f) => `
+      <tr>
+        <td>${fechaHora(f.fecha_pago)}</td>
+        <td class="izq"><b>${esc(f.empleado)}</b></td>
+        <td class="izq">${esc(f.cargo || '')}</td>
+        <td>${money(f.salario)}</td>
+        <td>${esc(f.moneda)}</td>
+        <td class="izq">${esc(f.nota || '')}</td>
+        <td><button class="btn-x" data-id="${f.id}">✕</button></td>
+      </tr>`).join('')
+    : '<tr><td colspan="7" class="vacio">No hay pagos de nómina en ese período.</td></tr>';
+
+  tb.querySelectorAll('.btn-x').forEach((b) => {
+    b.addEventListener('click', async () => {
+      if (!confirm('¿Borrar este pago de nómina? También se borra su gasto y su egreso de caja asociados. No se puede deshacer.')) return;
+      try {
+        await API.borrarNomina(Number(b.dataset.id));
+        await cargarNomina();
+        await cargarResumen();
+      } catch (e) { alert(e.message); }
+    });
+  });
+}
+
+document.getElementById('btnVerNomina').addEventListener('click', cargarNomina);
+
+document.getElementById('btnRegistrarNomina').addEventListener('click', async () => {
+  const d = {
+    empleado: document.getElementById('nEmpleado').value.trim(),
+    cargo: document.getElementById('nCargo').value.trim() || null,
+    salario: Number(document.getElementById('nSalario').value),
+    periodo: document.getElementById('nPeriodo').value || undefined,
+    moneda: document.getElementById('nMoneda').value,
+    nota: document.getElementById('nNota').value.trim() || null,
+  };
+  if (!d.empleado) { alert('Indique el nombre del empleado.'); return; }
+  if (!d.salario || d.salario <= 0) { alert('El salario debe ser mayor que cero.'); return; }
+  try {
+    await API.crearNomina(d);
+    document.getElementById('nEmpleado').value = '';
+    document.getElementById('nCargo').value = '';
+    document.getElementById('nSalario').value = '';
+    document.getElementById('nNota').value = '';
+    await cargarNomina();
+    await cargarResumen();
+  } catch (e) { alert('No se pudo registrar la nómina: ' + e.message); }
+});
+
+// ---------- Tributación (estimado, a partir de lo ya registrado) ----------
+let regimenesTributariosCache = null; // se llena una vez con GET /tributacion/regimenes
+
+// Muestra u oculta los campos de fecha según el período elegido.
+document.getElementById('tPeriodo').addEventListener('change', () => {
+  const esRango = document.getElementById('tPeriodo').value === 'rango';
+  document.getElementById('tRangoDesdeWrap').classList.toggle('oculto', !esRango);
+  document.getElementById('tRangoHastaWrap').classList.toggle('oculto', !esRango);
+});
+
+// Guarda el tipo de empresa elegido (para no tener que escogerlo cada
+// vez) llamando directamente a apiFetch: no es un método de API.* porque
+// api.js no se toca en este módulo, pero apiFetch ya está disponible en
+// el ámbito global (ambos scripts se cargan como <script> clásico).
+document.getElementById('tTipoEmpresa').addEventListener('change', async () => {
+  const tipo_empresa = document.getElementById('tTipoEmpresa').value;
+  try { await apiFetch('/contabilidad/tributacion/tipo-empresa', { method: 'PUT', body: JSON.stringify({ tipo_empresa }) }); }
+  catch (e) { /* si falla el guardado, no impide seguir viendo el cálculo */ }
+  await cargarTributacion();
+});
+
+document.getElementById('btnCalcularTributacion').addEventListener('click', cargarTributacion);
+
+const nombreBase = (b) => ({
+  utilidad_neta: 'Utilidad neta',
+  ventas_brutas: 'Ventas brutas',
+  nomina: 'Nómina',
+}[b] || b);
+
+async function cargarTributacion() {
+  // Primero, los regímenes vigentes (una sola vez): sirve para
+  // inicializar el selector de tipo de empresa con lo ya guardado y
+  // para mostrar el aviso legal tal como lo define el backend.
+  if (!regimenesTributariosCache) {
+    try {
+      regimenesTributariosCache = await API.regimenesTributarios();
+      document.getElementById('tTipoEmpresa').value = regimenesTributariosCache.tipo_empresa_actual || 'microempresa';
+      document.getElementById('tribAvisoLegal').textContent = regimenesTributariosCache.aviso_legal;
+    } catch (e) { /* si falla, seguimos con los valores por defecto del HTML */ }
+  }
+
+  const periodo = document.getElementById('tPeriodo').value;
+  const params = { periodo, tipo_empresa: document.getElementById('tTipoEmpresa').value };
+  if (periodo === 'rango') {
+    params.desde = document.getElementById('tDesde').value;
+    params.hasta = document.getElementById('tHasta').value;
+    if (!params.desde || !params.hasta) {
+      alert('Elija las dos fechas del rango personalizado.');
+      return;
+    }
+  }
+
+  let d;
+  try { d = await API.tributacion(params); }
+  catch (e) { alert('No se pudo calcular la tributación: ' + e.message); return; }
+
+  document.getElementById('tVentasBrutas').textContent = money(d.ventas_brutas);
+  document.getElementById('tGastosDeducibles').textContent = money(d.gastos_deducibles.total);
+  document.getElementById('tUtilidadNeta').textContent = money(d.utilidad_neta);
+  document.getElementById('tBaseImponible').textContent = money(d.base_imponible);
+  document.getElementById('tTotalTributar').textContent = money(d.total_tributos);
+  document.getElementById('tribRegimenNombre').textContent = d.resumen.regimen_nombre;
+  document.getElementById('tribResumenPeriodo').textContent =
+    `Período: ${esc(d.resumen.periodo)} · del ${d.resumen.desde} al ${d.resumen.hasta}`;
+
+  const tbT = document.getElementById('tbTributos');
+  tbT.innerHTML = d.tributos.length
+    ? d.tributos.map((t) => `
+      <tr>
+        <td class="izq"><b>${esc(t.nombre)}</b>${t.sobrescrito ? ' <span class="etq e-gasto" title="Porcentaje corregido a mano en Parámetros">editado</span>' : ''}</td>
+        <td>${esc(nombreBase(t.base))}</td>
+        <td>${money(t.base_valor)}</td>
+        <td>${t.porcentaje}%</td>
+        <td>${money(t.importe)}</td>
+      </tr>`).join('')
+    : '<tr><td colspan="5" class="vacio">Sin tributos configurados.</td></tr>';
+
+  const tbG = document.getElementById('tbGastosCategoria');
+  tbG.innerHTML = d.gastos_deducibles.por_categoria.length
+    ? d.gastos_deducibles.por_categoria.map((g) => `
+      <tr><td class="izq">${esc(g.categoria)}</td><td>${money(g.total)}</td></tr>`).join('')
+    : '<tr><td colspan="2" class="vacio">No hay gastos registrados en este período.</td></tr>';
+
+  const ul = document.getElementById('tribAdvertencias');
+  ul.innerHTML = d.advertencias.length
+    ? d.advertencias.map((a) => `<li>${esc(a)}</li>`).join('')
+    : '<li>Sin advertencias.</li>';
+}
 
 cargarResumen();

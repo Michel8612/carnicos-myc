@@ -42,6 +42,21 @@
     .e-venta{background:#e3f2fd;color:#1565C0} .e-almacen{background:#fff3e0;color:#e65100}
     .e-produccion{background:#f3e5f5;color:#6a1b9a} .e-gasto{background:#ffebee;color:#c62828}
     .vacio { text-align:center; color:#777; padding:24px; }
+    /* Tributación */
+    .tarjeta.c-destacada { background:#283593; color:#fff; }
+    .tarjeta.c-destacada .n { color:#fff; } .tarjeta.c-destacada .l { color:#c5cae9; }
+    .aviso-legal { background:#fff8e1; border:1px solid #ffca28; color:#7a5c00; border-radius:8px;
+      padding:10px 14px; font-size:12.5px; margin:14px 0; }
+    .aviso-legal b { color:#5d4400; }
+    .lista-advertencias { margin:10px 0; padding:0; list-style:none; }
+    .lista-advertencias li { background:#ffebee; color:#8d1a1a; border-radius:6px; padding:8px 12px;
+      font-size:12.5px; margin-bottom:6px; }
+    .fila-selectores { display:flex; gap:10px; flex-wrap:wrap; align-items:end; background:#fff;
+      padding:12px; border-radius:10px; box-shadow:0 3px 10px rgba(0,0,0,.08); margin-bottom:14px; }
+    .fila-selectores label { display:block; font-size:12px; color:#555; margin-bottom:3px; }
+    .fila-selectores select, .fila-selectores input { padding:8px; border:1px solid #cfd8dc; border-radius:8px; font-size:14px; }
+    .fila-selectores button { padding:9px 14px; border:none; border-radius:8px; cursor:pointer; font-size:14px; background:#1976D2; color:#fff; }
+    .oculto { display:none !important; }
   </style>
 </head>
 
@@ -77,6 +92,9 @@
       <button data-panel="pVentas">Ventas</button>
       <button data-panel="pLibro">Libro (historial)</button>
       <button data-panel="pMovs">Movimientos de almacén</button>
+      <button data-panel="pGastos">Gastos</button>
+      <button data-panel="pNomina">Nómina</button>
+      <button data-panel="pTributacion">Tributación</button>
     </div>
 
     <!-- ALMACÉN -->
@@ -179,6 +197,170 @@
           <tbody id="tbMovs"></tbody>
         </table>
       </div>
+    </section>
+
+    <!-- GASTOS -->
+    <section class="panel" id="pGastos">
+      <h3 class="seccion">Registrar gasto</h3>
+      <p class="sub">
+        Lo que se registre aquí es lo que la pestaña <b>Tributación</b> cuenta como gasto
+        deducible. Electricidad, alquiler, materia prima, nómina, etc.: todo lo que sale de
+        caja debe quedar anotado aquí para que el estimado de impuestos sea real.
+      </p>
+      <div class="filtros">
+        <div>
+          <label>Categoría</label>
+          <select id="gCategoria"></select>
+        </div>
+        <div><label>Concepto</label><input type="text" id="gConcepto" placeholder="Ej. Factura eléctrica de julio"></div>
+        <div><label>Monto</label><input type="number" id="gMonto" min="0" step="0.01" placeholder="0.00"></div>
+        <div>
+          <label>Moneda</label>
+          <select id="gMoneda">
+            <option value="CUP">CUP</option>
+            <option value="USD">USD</option>
+            <option value="MLC">MLC</option>
+          </select>
+        </div>
+        <div><label>Nota (opcional)</label><input type="text" id="gNota"></div>
+        <button class="b-filtrar" id="btnRegistrarGasto">Registrar gasto</button>
+      </div>
+
+      <h3 class="seccion">Gastos del mes</h3>
+      <div class="filtros">
+        <div><label>Mes</label><input type="month" id="gMes"></div>
+        <button class="b-filtrar" id="btnVerGastos">Ver</button>
+        <button id="btnActualizarTasa" style="background:#607d8b;color:#fff;">↻ Actualizar tasa del dólar</button>
+      </div>
+      <p class="sub" id="gTasaResultado"></p>
+
+      <div class="tarjetas" id="gTotalesPorMoneda"></div>
+
+      <div class="tabla-scroll">
+        <table class="datos">
+          <thead>
+            <tr>
+              <th>Fecha</th><th class="izq">Categoría</th><th class="izq">Concepto</th>
+              <th>Monto</th><th>Moneda</th><th class="izq">Nota</th>
+            </tr>
+          </thead>
+          <tbody id="tbGastos"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- NÓMINA -->
+    <section class="panel" id="pNomina">
+      <h3 class="seccion">Registrar pago de nómina</h3>
+      <p class="sub">
+        Lo registrado aquí es la base de la <b>Contribución a la Seguridad Social</b> en la
+        pestaña Tributación. Cada pago crea también su gasto y su egreso de caja: no hace
+        falta registrarlo dos veces.
+      </p>
+      <div class="filtros">
+        <div><label>Empleado</label><input type="text" id="nEmpleado" placeholder="Nombre y apellidos"></div>
+        <div><label>Cargo (opcional)</label><input type="text" id="nCargo"></div>
+        <div><label>Salario</label><input type="number" id="nSalario" min="0" step="0.01" placeholder="0.00"></div>
+        <div><label>Período</label><input type="month" id="nPeriodo"></div>
+        <div>
+          <label>Moneda</label>
+          <select id="nMoneda">
+            <option value="CUP">CUP</option>
+            <option value="USD">USD</option>
+            <option value="MLC">MLC</option>
+          </select>
+        </div>
+        <div><label>Nota (opcional)</label><input type="text" id="nNota"></div>
+        <button class="b-filtrar" id="btnRegistrarNomina">Registrar pago</button>
+      </div>
+
+      <h3 class="seccion">Pagos del período</h3>
+      <div class="filtros">
+        <div><label>Período</label><input type="month" id="nPeriodoVer"></div>
+        <button class="b-filtrar" id="btnVerNomina">Ver</button>
+      </div>
+
+      <div class="tarjetas" id="nTotalesPorMoneda"></div>
+
+      <div class="tabla-scroll">
+        <table class="datos">
+          <thead>
+            <tr>
+              <th>Fecha de pago</th><th class="izq">Empleado</th><th class="izq">Cargo</th>
+              <th>Salario</th><th>Moneda</th><th class="izq">Nota</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="tbNomina"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- TRIBUTACIÓN -->
+    <section class="panel" id="pTributacion">
+      <h3 class="seccion">Tributación (estimado)</h3>
+      <p class="sub">
+        Cálculo estimado a partir de lo ya registrado en el sistema (ventas, gastos, nómina).
+        No hay que volver a teclear nada.
+      </p>
+      <div class="aviso-legal">
+        <b>Aviso importante:</b> <span id="tribAvisoLegal">Los porcentajes son valores de referencia y deben confirmarse con la ONAT o un contador antes de declarar o pagar impuestos reales.</span>
+      </div>
+
+      <div class="fila-selectores">
+        <div>
+          <label>Tipo de empresa</label>
+          <select id="tTipoEmpresa">
+            <option value="microempresa">Microempresa</option>
+            <option value="pequena_empresa">Pequeña empresa</option>
+            <option value="mediana_empresa">Mediana empresa</option>
+          </select>
+        </div>
+        <div>
+          <label>Período</label>
+          <select id="tPeriodo">
+            <option value="mes">Mes en curso</option>
+            <option value="trimestre">Trimestre en curso</option>
+            <option value="ano">Año en curso</option>
+            <option value="rango">Rango personalizado</option>
+          </select>
+        </div>
+        <div id="tRangoDesdeWrap" class="oculto"><label>Desde</label><input type="date" id="tDesde"></div>
+        <div id="tRangoHastaWrap" class="oculto"><label>Hasta</label><input type="date" id="tHasta"></div>
+        <button id="btnCalcularTributacion">Calcular</button>
+      </div>
+
+      <p class="sub" id="tribResumenPeriodo"></p>
+
+      <div class="tarjetas">
+        <div class="tarjeta c-azul"><div class="n" id="tVentasBrutas">0.00</div><div class="l">Ventas brutas</div></div>
+        <div class="tarjeta c-rojo"><div class="n" id="tGastosDeducibles">0.00</div><div class="l">Gastos deducibles</div></div>
+        <div class="tarjeta c-verde"><div class="n" id="tUtilidadNeta">0.00</div><div class="l">Utilidad neta</div></div>
+        <div class="tarjeta c-gris"><div class="n" id="tBaseImponible">0.00</div><div class="l">Base imponible</div></div>
+        <div class="tarjeta c-destacada"><div class="n" id="tTotalTributar">0.00</div><div class="l">Total a tributar (estimado)</div></div>
+      </div>
+
+      <h3 class="seccion">Tributos aplicados — <span id="tribRegimenNombre"></span></h3>
+      <div class="tabla-scroll">
+        <table class="datos">
+          <thead>
+            <tr>
+              <th class="izq">Tributo</th><th>Base</th><th>Valor de la base</th><th>Porcentaje</th><th>Importe</th>
+            </tr>
+          </thead>
+          <tbody id="tbTributos"></tbody>
+        </table>
+      </div>
+
+      <h3 class="seccion">Gastos deducibles por categoría</h3>
+      <div class="tabla-scroll">
+        <table class="datos">
+          <thead><tr><th class="izq">Categoría</th><th>Total</th></tr></thead>
+          <tbody id="tbGastosCategoria"></tbody>
+        </table>
+      </div>
+
+      <h3 class="seccion">Advertencias</h3>
+      <ul class="lista-advertencias" id="tribAdvertencias"></ul>
     </section>
   </main>
 

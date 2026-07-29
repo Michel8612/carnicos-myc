@@ -33,6 +33,31 @@ function almacenDeLaSesion(req) {
   return null;
 }
 
+// Quién puede resolver (aceptar/cancelar) una transferencia PENDIENTE:
+// el destinatario real (el almacenero dueño de ese almacén, o el vendedor
+// al que iba dirigida), más los roles que ya ven/mueven todo en el
+// sistema (dueño, admin, proveedor —soporte, mismo trato que en el resto
+// del código— y almacen_central).
+function puedeResolverTransferencia(req, t) {
+  const rol = req.usuario.rol;
+  if (rol === 'dueno' || rol === 'admin' || rol === 'proveedor' || rol === 'almacen_central') return true;
+  if (t.destino_tipo === 'almacen') {
+    return ES_ALMACENERO_LIMITADO(rol) && Number(req.usuario.almacen_id) === Number(t.destino_almacen_id);
+  }
+  if (t.destino_tipo === 'ventas') {
+    return Number(req.usuario.id) === Number(t.destino_usuario_id);
+  }
+  return false;
+}
+
+// Nombre real del usuario (para dejar rastro legible en transferencias y
+// en el libro). req.usuario solo trae el nombre de USUARIO (login), no el
+// nombre para mostrar, así que se busca en la tabla.
+async function nombreDeUsuario(id) {
+  const u = await db.prepare('SELECT nombre FROM usuarios WHERE id = ?').get(id);
+  return u ? u.nombre : null;
+}
+
 // ---------- Productos ----------
 
 // Lista de productos con su unidad.
@@ -172,15 +197,25 @@ async function moverExistencia(productoId, almacenId, delta) {
 
 // Entrada, salida o ajuste. Actualiza existencias y deja el rastro.
 //
-// La SALIDA admite, opcionalmente:
-//  - destino_almacen_id: además de sacar del almacén de origen, entra
-//    esa misma cantidad al almacén de destino (un traslado completo,
-//    en una sola transacción).
-//  - destino_texto: no mueve nada más, solo queda anotado a dónde fue
-//    (ej. "Punto de venta del centro").
-// Si no viene ninguno de los dos, es una salida simple.
+// La SALIDA admite, opcionalmente, un DESTINO:
+//  - destino_tipo ('almacen'|'ventas') + destino_id: la mercancía sale
+//    del origen YA, pero NO entra sola al destino. Queda "en tránsito"
+//    (una fila en transferencias con estado='pendiente') hasta que el
+//    destinatario la acepte o la cancele. Se admite también el campo
+//    viejo destino_almacen_id (compatibilidad hacia atrás): equivale a
+//    destino_tipo:'almacen'.
+//  - destino_texto: no crea ninguna transferencia, solo queda anotado a
+//    dónde fue (ej. "Punto de venta del centro"). Puede combinarse con
+//    lo anterior o usarse solo.
+// Si no viene nada de destino, es una salida simple.
 router.post('/movimientos', async (req, res) => {
-  const { producto_id, almacen_id, tipo, cantidad, nota, destino_almacen_id, destino_texto } = req.body;
+  const { producto_id, almacen_id, tipo, cantidad, nota, destino_texto, proveedor, costo_unitario } = req.body;
+  let { destino_tipo, destino_id } = req.body;
+  if (!destino_id && req.body.destino_almacen_id) {
+    destino_tipo = 'almacen';
+    destino_id = req.body.destino_almacen_id;
+  }
+
   if (!producto_id || !almacen_id || !tipo || !cantidad) {
     return res.status(400).json({ error: 'Faltan datos del movimiento.' });
   }
@@ -196,12 +231,17 @@ router.post('/movimientos', async (req, res) => {
     return res.status(403).json({ error: 'Solo puede registrar movimientos en su propio almacén.' });
   }
 
-  // El traslado a otro almacén (destino_almacen_id) solo tiene sentido
-  // para una SALIDA: es lo que sale de aquí y entra allá.
-  const destinoId = (tipo === 'salida' && destino_almacen_id) ? Number(destino_almacen_id) : null;
-  if (destinoId && destinoId === Number(almacen_id)) {
+  // El envío a otro destino solo tiene sentido para una SALIDA.
+  const destinoTipo = (tipo === 'salida' && destino_id && ['almacen', 'ventas'].includes(destino_tipo))
+    ? destino_tipo
+    : null;
+  const destinoId = destinoTipo ? Number(destino_id) : null;
+  if (destinoTipo === 'almacen' && destinoId === Number(almacen_id)) {
     return res.status(400).json({ error: 'El almacén de destino debe ser distinto del de origen.' });
   }
+
+  let transferenciaId = null;
+  let destinoNombreParaNota = null;
 
   const tx = db.transaction(async () => {
     // 1) Movimiento principal (entrada/salida/ajuste) en el almacén de origen.
@@ -213,13 +253,67 @@ router.post('/movimientos', async (req, res) => {
     const delta = tipo === 'salida' ? -cant : cant;
     await moverExistencia(producto_id, almacen_id, delta);
 
-    // 2) Si es un traslado completo, dar entrada en el almacén de destino.
-    if (destinoId) {
+    // 1.b) Si la entrada viene de una COMPRA (se indicó el proveedor), se
+    //      deja además su rastro en la tabla "compras". No hace falta una
+    //      pantalla aparte: comprar mercancía ya se registra aquí, y así
+    //      Tributación puede informar cuánto se compró en el período.
+    //      Ojo: comprar NO resta ganancia (es cambiar dinero por
+    //      inventario), por eso no genera gasto ni asiento de costo.
+    if (tipo === 'entrada' && proveedor && String(proveedor).trim()) {
+      const prod = await db.prepare('SELECT precio_costo FROM productos WHERE id = ?').get(producto_id);
+      const costoUnit = Number(costo_unitario) > 0
+        ? Number(costo_unitario)
+        : Number(prod?.precio_costo) || 0;
+      const compra = await db.prepare(`
+        INSERT INTO compras (tipo, proveedor, almacen_id, costo_total, moneda, referencia, usuario_id)
+        VALUES ('nacional', ?, ?, ?, 'CUP', ?, ?)
+      `).run(String(proveedor).trim(), almacen_id, cant * costoUnit, nota || null, req.usuario.id);
       await db.prepare(`
-        INSERT INTO movimientos (producto_id, almacen_id, tipo, cantidad, origen_tipo, usuario_id, nota)
-        VALUES (?, ?, 'entrada', ?, 'traslado', ?, ?)
-      `).run(producto_id, destinoId, cant, req.usuario.id, nota || null);
-      await moverExistencia(producto_id, destinoId, cant);
+        INSERT INTO compras_detalle (compra_id, producto_id, cantidad, costo_unitario)
+        VALUES (?, ?, ?, ?)
+      `).run(compra.lastInsertRowid, producto_id, cant, costoUnit);
+    }
+
+    // 2) Si hay destino, la mercancía queda EN TRÁNSITO: ya no se suma
+    //    sola allá. Se crea la transferencia pendiente de aceptación.
+    if (destinoTipo) {
+      const producto = await db.prepare('SELECT nombre, precio_costo FROM productos WHERE id = ?').get(producto_id);
+      const origenAlm = await db.prepare('SELECT nombre FROM almacenes WHERE id = ?').get(almacen_id);
+
+      let destinoNombre = null;
+      let destinoAlmacenId = null;
+      let destinoUsuarioId = null;
+      if (destinoTipo === 'almacen') {
+        const d = await db.prepare('SELECT nombre FROM almacenes WHERE id = ?').get(destinoId);
+        if (!d) throw new Error('El almacén de destino no existe.');
+        destinoNombre = d.nombre;
+        destinoAlmacenId = destinoId;
+      } else {
+        const d = await db.prepare(
+          "SELECT nombre FROM usuarios WHERE id = ? AND rol = 'ventas' AND activo = 1"
+        ).get(destinoId);
+        if (!d) throw new Error('El vendedor de destino no existe o no está activo.');
+        destinoNombre = d.nombre;
+        destinoUsuarioId = destinoId;
+      }
+      destinoNombreParaNota = destinoNombre;
+
+      const enviadoNombre = (await nombreDeUsuario(req.usuario.id)) || req.usuario.usuario;
+
+      const r = await db.prepare(`
+        INSERT INTO transferencias (
+          producto_id, producto_nombre, cantidad, costo_unitario,
+          origen_almacen_id, origen_almacen_nombre,
+          destino_tipo, destino_almacen_id, destino_usuario_id, destino_nombre,
+          estado, enviado_por, enviado_nombre, nota
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pendiente', ?, ?, ?)
+      `).run(
+        producto_id, producto?.nombre || null, cant, producto?.precio_costo || 0,
+        almacen_id, origenAlm?.nombre || null,
+        destinoTipo, destinoAlmacenId, destinoUsuarioId, destinoNombre,
+        req.usuario.id, enviadoNombre, destino_texto || null
+      );
+      transferenciaId = r.lastInsertRowid;
     }
   });
 
@@ -239,14 +333,14 @@ router.post('/movimientos', async (req, res) => {
 
     if (info) {
       const valor = Number((cant * info.costo).toFixed(2));
-      let destinoNombre = null;
-      if (destinoId) {
-        const d = await db.prepare('SELECT nombre FROM almacenes WHERE id = ?').get(destinoId);
-        destinoNombre = d ? d.nombre : null;
-      }
-      // A dónde fue: traslado a otro almacén, un destino libre en texto, o nada.
+      // A dónde fue: enviado a otro almacén/vendedor (pendiente de que lo
+      // acepten), un destino libre en texto, o nada.
       const partesDestino = [];
-      if (destinoId) partesDestino.push(`trasladado a ${destinoNombre || 'otro almacén'}`);
+      if (destinoTipo) {
+        partesDestino.push(
+          `enviado a ${destinoTipo === 'almacen' ? 'almacén' : 'vendedor'} ${destinoNombreParaNota || ''} — pendiente de aceptación`
+        );
+      }
       if (destino_texto) partesDestino.push(`destino: ${destino_texto}`);
 
       await anotar({
@@ -269,9 +363,211 @@ router.post('/movimientos', async (req, res) => {
       });
     }
 
-    res.json({ ok: true, trasladado_a: destinoId || null });
+    res.json({ ok: true, transferencia_id: transferenciaId });
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+// ============================================================
+//  Transferencias entre áreas (almacén → almacén, almacén → vendedor)
+// ============================================================
+
+// Todos los destinos posibles a los que se puede enviar una salida:
+// todos los almacenes + todos los vendedores activos. Se consulta en
+// vivo (nada cacheado) para que aparezca de inmediato cualquier almacén
+// o vendedor creado después. Cualquiera con sesión puede verlo (GET).
+router.get('/destinos', async (req, res) => {
+  // Si quien consulta es un almacenero con almacén propio, no tiene
+  // sentido que se ofrezca a sí mismo como destino de su propia salida.
+  const origenId = almacenDeLaSesion(req);
+
+  const almacenes = await db.prepare('SELECT id, nombre FROM almacenes ORDER BY nombre').all();
+  const vendedores = await db.prepare(
+    "SELECT id, nombre FROM usuarios WHERE activo = 1 AND rol = 'ventas' ORDER BY nombre"
+  ).all();
+
+  const destinos = [
+    ...almacenes
+      .filter((a) => !origenId || Number(a.id) !== Number(origenId))
+      .map((a) => ({ tipo: 'almacen', id: a.id, nombre: a.nombre })),
+    ...vendedores.map((v) => ({ tipo: 'ventas', id: v.id, nombre: `${v.nombre} (Ventas)` })),
+  ];
+
+  res.json({ destinos });
+});
+
+// Transferencias pendientes que le tocan a QUIEN consulta: su propio
+// almacén (si es almacenero) o él mismo como vendedor destinatario.
+// Dueño/admin/proveedor/almacen_central ven TODAS las pendientes.
+router.get('/transferencias/pendientes', async (req, res) => {
+  const rol = req.usuario.rol;
+  let filas;
+  if (rol === 'dueno' || rol === 'admin' || rol === 'proveedor' || rol === 'almacen_central') {
+    filas = await db.prepare(
+      "SELECT * FROM transferencias WHERE estado = 'pendiente' ORDER BY fecha_envio DESC"
+    ).all();
+  } else if (ES_ALMACENERO_LIMITADO(rol)) {
+    filas = await db.prepare(`
+      SELECT * FROM transferencias
+      WHERE estado = 'pendiente' AND destino_tipo = 'almacen' AND destino_almacen_id = ?
+      ORDER BY fecha_envio DESC
+    `).all(req.usuario.almacen_id);
+  } else {
+    // Cualquier otro rol (típicamente 'ventas') ve las suyas como
+    // destinatario directo.
+    filas = await db.prepare(`
+      SELECT * FROM transferencias
+      WHERE estado = 'pendiente' AND destino_tipo = 'ventas' AND destino_usuario_id = ?
+      ORDER BY fecha_envio DESC
+    `).all(req.usuario.id);
+  }
+  res.json(filas);
+});
+
+// Historial completo de transferencias (últimas 200, más recientes
+// primero), con su estado, para la vista de historial.
+router.get('/transferencias', async (req, res) => {
+  const filas = await db.prepare(
+    'SELECT * FROM transferencias ORDER BY fecha_envio DESC LIMIT 200'
+  ).all();
+  res.json(filas);
+});
+
+// Aceptar una transferencia pendiente: entra de verdad al destino.
+router.post('/transferencias/:id/aceptar', async (req, res) => {
+  const id = Number(req.params.id);
+
+  const tx = db.transaction(async () => {
+    const t = await db.prepare('SELECT * FROM transferencias WHERE id = ?').get(id);
+    if (!t) throw Object.assign(new Error('Transferencia no encontrada.'), { status: 404 });
+    if (t.estado !== 'pendiente') {
+      throw Object.assign(new Error('Esa transferencia ya fue resuelta.'), { status: 400 });
+    }
+    if (!puedeResolverTransferencia(req, t)) {
+      throw Object.assign(new Error('No tiene permiso para aceptar esta transferencia.'), { status: 403 });
+    }
+
+    if (t.destino_tipo === 'almacen') {
+      // Igual que hacía antes el traslado directo: entra al almacén destino.
+      await db.prepare(`
+        INSERT INTO movimientos (producto_id, almacen_id, tipo, cantidad, origen_tipo, usuario_id, nota)
+        VALUES (?, ?, 'entrada', ?, 'traslado', ?, ?)
+      `).run(
+        t.producto_id, t.destino_almacen_id, t.cantidad, req.usuario.id,
+        `Transferencia aceptada desde ${t.origen_almacen_nombre || 'otro almacén'}`
+      );
+      await moverExistencia(t.producto_id, t.destino_almacen_id, t.cantidad);
+    } else {
+      // destino_tipo === 'ventas': entra en la hoja PROPIA del vendedor
+      // (tabla venta_inventario), igual que POST /ventas/producto. Si ya
+      // tiene ese producto (mismo nombre), suma cantidad en vez de duplicar.
+      const existente = await db.prepare(
+        'SELECT id FROM venta_inventario WHERE usuario_id = ? AND lower(nombre) = lower(?)'
+      ).get(t.destino_usuario_id, t.producto_nombre);
+
+      // La unidad del producto de almacén (abreviatura), para que la hoja
+      // del vendedor la muestre igual que el resto de sus productos.
+      const unidadProd = await db.prepare(`
+        SELECT COALESCE(u.abreviatura, 'u') AS abreviatura
+        FROM productos p LEFT JOIN unidades u ON u.id = p.unidad_id
+        WHERE p.id = ?
+      `).get(t.producto_id);
+
+      if (existente) {
+        await db.prepare('UPDATE venta_inventario SET cantidad = cantidad + ? WHERE id = ?')
+          .run(t.cantidad, existente.id);
+      } else {
+        await db.prepare(`
+          INSERT INTO venta_inventario (usuario_id, nombre, unidad, cantidad, costo_unitario, precio_venta)
+          VALUES (?, ?, ?, ?, ?, 0)
+        `).run(
+          t.destino_usuario_id, t.producto_nombre, unidadProd?.abreviatura || 'u',
+          t.cantidad, t.costo_unitario || 0
+        );
+      }
+    }
+
+    const resueltoNombre = (await nombreDeUsuario(req.usuario.id)) || req.usuario.usuario;
+    await db.prepare(`
+      UPDATE transferencias
+      SET estado = 'aceptada', resuelto_por = ?, resuelto_nombre = ?, fecha_resolucion = now()
+      WHERE id = ?
+    `).run(req.usuario.id, resueltoNombre, id);
+
+    return t;
+  });
+
+  try {
+    const t = await tx();
+    await anotar({
+      tipo: 'almacen',
+      concepto: `Transferencia aceptada — ${t.producto_nombre}`,
+      producto: t.producto_nombre,
+      cantidad: t.cantidad,
+      unidad: '',
+      costo: 0,
+      ingreso: 0,
+      valor: Number((t.cantidad * (t.costo_unitario || 0)).toFixed(2)),
+      area: 'almacen',
+      usuario: req.usuario,
+      nota: `De ${t.origen_almacen_nombre || 'almacén'} a ${t.destino_nombre || (t.destino_tipo === 'almacen' ? 'almacén' : 'vendedor')} (transferencia aceptada)`,
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message });
+  }
+});
+
+// Cancelar una transferencia pendiente: la mercancía NO puede
+// desaparecer —ya salió del origen cuando se envió—, así que vuelve.
+router.post('/transferencias/:id/cancelar', async (req, res) => {
+  const id = Number(req.params.id);
+
+  const tx = db.transaction(async () => {
+    const t = await db.prepare('SELECT * FROM transferencias WHERE id = ?').get(id);
+    if (!t) throw Object.assign(new Error('Transferencia no encontrada.'), { status: 404 });
+    if (t.estado !== 'pendiente') {
+      throw Object.assign(new Error('Esa transferencia ya fue resuelta.'), { status: 400 });
+    }
+    if (!puedeResolverTransferencia(req, t)) {
+      throw Object.assign(new Error('No tiene permiso para cancelar esta transferencia.'), { status: 403 });
+    }
+
+    await db.prepare(`
+      INSERT INTO movimientos (producto_id, almacen_id, tipo, cantidad, origen_tipo, usuario_id, nota)
+      VALUES (?, ?, 'entrada', ?, 'traslado', ?, 'Devolución por transferencia cancelada')
+    `).run(t.producto_id, t.origen_almacen_id, t.cantidad, req.usuario.id);
+    await moverExistencia(t.producto_id, t.origen_almacen_id, t.cantidad);
+
+    const resueltoNombre = (await nombreDeUsuario(req.usuario.id)) || req.usuario.usuario;
+    await db.prepare(`
+      UPDATE transferencias
+      SET estado = 'cancelada', resuelto_por = ?, resuelto_nombre = ?, fecha_resolucion = now()
+      WHERE id = ?
+    `).run(req.usuario.id, resueltoNombre, id);
+
+    return t;
+  });
+
+  try {
+    const t = await tx();
+    await anotar({
+      tipo: 'almacen',
+      concepto: `Transferencia cancelada — ${t.producto_nombre}`,
+      producto: t.producto_nombre,
+      cantidad: t.cantidad,
+      unidad: '',
+      costo: 0,
+      ingreso: 0,
+      valor: Number((t.cantidad * (t.costo_unitario || 0)).toFixed(2)),
+      area: 'almacen',
+      usuario: req.usuario,
+      nota: `Devuelto a ${t.origen_almacen_nombre || 'almacén de origen'} (transferencia cancelada)`,
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message });
   }
 });
 

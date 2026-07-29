@@ -26,6 +26,16 @@
       <span id="contadorAlmacenes">0 almacenes</span>
     </div>
 
+    <!-- Aviso de entradas por recibir (transferencias pendientes) -->
+    <div id="avisoPendientes" class="aviso-pendientes hidden"></div>
+
+    <!-- Bandeja de recepción: transferencias pendientes dirigidas a este
+         usuario (su almacén, o él como vendedor). Si no hay, no se muestra. -->
+    <div id="bandejaRecepcion" class="hidden">
+      <h2>Entradas por recibir</h2>
+      <div id="bandejaLista"></div>
+    </div>
+
     <!-- Botón para agregar producto -->
     <button id="btnAgregarProducto">Agregar Producto</button>
 
@@ -72,13 +82,24 @@
         <input type="number" step="0.01" id="movCantidad" placeholder="Cantidad" required>
 
         <!-- A dónde va lo que sale. Es OPCIONAL: si no se pone nada, es una
-             salida simple (el dueño la pidió y ya). Si se elige otro almacén,
-             la mercancía se envía allí; si se escribe un lugar, queda anotado. -->
+             salida simple. Si se elige un almacén o un vendedor, la mercancía
+             queda EN TRÁNSITO hasta que el destinatario la acepte; si se
+             escribe un lugar libre, solo queda anotado (no crea transferencia). -->
         <div id="bloqueDestino" class="hidden">
           <select id="movDestinoAlmacen">
             <option value="">¿A dónde va? (opcional)</option>
           </select>
           <input type="text" id="movDestinoTexto" placeholder="…o escriba el lugar (opcional)">
+        </div>
+
+        <!-- Solo para ENTRADAS: si la mercancía viene de una compra, se
+             anota el proveedor y el costo. Con eso la entrada deja además
+             su rastro en la tabla de compras, y Tributación puede informar
+             cuánto se compró en el período. Es opcional: una entrada sin
+             proveedor se comporta exactamente como siempre. -->
+        <div id="bloqueCompra" class="hidden">
+          <input type="text" id="movProveedor" placeholder="Proveedor (opcional, si fue una compra)">
+          <input type="number" step="0.01" id="movCostoUnitario" placeholder="Costo por unidad (opcional)">
         </div>
 
         <input type="text" id="movNota" placeholder="Nota (opcional)">
@@ -117,6 +138,28 @@
         </thead>
         <tbody id="almacenList">
           <!-- Aquí se cargan los productos dinámicamente -->
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Historial de transferencias enviadas: estado de cada una
+         (pendiente / aceptada / cancelada). -->
+    <div id="historialTransferencias">
+      <h2>Historial de Transferencias</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Producto</th>
+            <th>Cantidad</th>
+            <th>De</th>
+            <th>A</th>
+            <th>Enviado por</th>
+            <th>Fecha</th>
+            <th>Estado</th>
+          </tr>
+        </thead>
+        <tbody id="historialTransferenciasList">
+          <!-- Se llena dinámicamente desde API.transferenciasHistorial() -->
         </tbody>
       </table>
     </div>

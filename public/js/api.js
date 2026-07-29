@@ -203,6 +203,29 @@ const API = {
   ganancia: (mes) => apiFetch('/costos/ganancia' + (mes ? `?mes=${mes}` : '')),
   gastos: (mes) => apiFetch('/costos/gastos' + (mes ? `?mes=${mes}` : '')),
   cajaResumen: (fecha) => apiFetch('/caja/resumen' + (fecha ? `?fecha=${fecha}` : '')),
+
+  // --- Transferencias entre áreas (almacén → almacén / → vendedor) ---
+  destinosTransferencia: () => apiFetch('/inventario/destinos'),
+  transferenciasPendientes: () => apiFetch('/inventario/transferencias/pendientes'),
+  transferenciasHistorial: () => apiFetch('/inventario/transferencias'),
+  aceptarTransferencia: (id) => apiFetch(`/inventario/transferencias/${id}/aceptar`, { method: 'POST' }),
+  cancelarTransferencia: (id) => apiFetch(`/inventario/transferencias/${id}/cancelar`, { method: 'POST' }),
+
+  // --- Gastos y nómina (alimentan lo deducible de la tributación) ---
+  categoriasGasto: () => apiFetch('/costos/categorias'),
+  crearGasto: (d) => apiFetch('/costos/gastos', { method: 'POST', body: JSON.stringify(d) }),
+  nomina: (periodo) => apiFetch('/costos/nomina' + (periodo ? `?periodo=${periodo}` : '')),
+  crearNomina: (d) => apiFetch('/costos/nomina', { method: 'POST', body: JSON.stringify(d) }),
+  borrarNomina: (id) => apiFetch(`/costos/nomina/${id}`, { method: 'DELETE' }),
+
+  // --- Tasa del dólar (elTOQUE) ---
+  tasaActual: () => apiFetch('/tasas/actual'),
+  actualizarTasa: () => apiFetch('/tasas/actualizar', { method: 'POST' }),
+  fijarTasaManual: (valor) => apiFetch('/tasas/manual', { method: 'PUT', body: JSON.stringify({ valor }) }),
+
+  // --- Tributación ---
+  tributacion: (p) => apiFetch('/contabilidad/tributacion?' + new URLSearchParams(p).toString()),
+  regimenesTributarios: () => apiFetch('/contabilidad/tributacion/regimenes'),
 };
 
 // Exponer en window para las páginas (scripts clásicos).

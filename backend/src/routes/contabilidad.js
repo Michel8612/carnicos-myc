@@ -16,6 +16,14 @@
 import { Router } from 'express';
 import db from '../db/index.js';
 import { requiereSesion } from '../middleware/auth.js';
+import {
+  REGIMENES,
+  TIPOS_EMPRESA,
+  CLAVE_TIPO_EMPRESA,
+  AVISO_LEGAL,
+  combinarConParametros,
+  calcularTributosConRegimen,
+} from '../config/tributacion.js';
 
 const router = Router();
 router.use(requiereSesion);
@@ -243,6 +251,221 @@ router.get('/movimientos', async (req, res) => {
     ...f,
     valor: Number((f.cantidad * f.costo_unitario).toFixed(2)),
   })));
+});
+
+// ============================================================
+//  TRIBUTACIÓN — estimado de impuestos a partir de lo ya registrado
+//
+//  IMPORTANTE: esto es un ESTIMADO de referencia (ver aviso legal en
+//  backend/src/config/tributacion.js). No sustituye la declaración
+//  oficial ante la ONAT.
+// ============================================================
+
+// Trae de `parametros` todo lo que empiece con "trib." (porcentajes
+// corregidos a mano) más la clave del tipo de empresa elegido, y lo
+// devuelve como un objeto simple { clave: valor }.
+async function leerParametrosTributarios() {
+  const filas = await db.prepare(
+    'SELECT clave, valor FROM parametros WHERE clave LIKE ? OR clave = ?'
+  ).all('trib.%', CLAVE_TIPO_EMPRESA);
+  const mapa = {};
+  for (const f of filas) mapa[f.clave] = f.valor;
+  return mapa;
+}
+
+// Calcula desde/hasta (fechas 'YYYY-MM-DD', huso America/Havana) para
+// mes/trimestre/año EN CURSO, del día 1 del período hasta hoy.
+function limitesPeriodo(periodo, hoyStr) {
+  const [y, m] = hoyStr.split('-').map(Number);
+  if (periodo === 'trimestre') {
+    const inicioTrim = Math.floor((m - 1) / 3) * 3 + 1;
+    return { desde: `${y}-${String(inicioTrim).padStart(2, '0')}-01`, hasta: hoyStr };
+  }
+  if (periodo === 'ano') {
+    return { desde: `${y}-01-01`, hasta: hoyStr };
+  }
+  // 'mes' (por defecto)
+  return { desde: `${y}-${String(m).padStart(2, '0')}-01`, hasta: hoyStr };
+}
+
+// Régimenes vigentes (los de tributacion.js ya combinados con lo que
+// el dueño haya corregido a mano en `parametros`), para pintarlos en
+// la interfaz y para saber qué tipo de empresa tiene guardado.
+router.get('/tributacion/regimenes', async (req, res) => {
+  const mapa = await leerParametrosTributarios();
+  const regimenes = combinarConParametros(mapa);
+  res.json({
+    regimenes,
+    tipos_empresa: TIPOS_EMPRESA,
+    tipo_empresa_actual: mapa[CLAVE_TIPO_EMPRESA] || 'microempresa',
+    aviso_legal: AVISO_LEGAL,
+  });
+});
+
+// Guarda el tipo de empresa elegido, para no tener que escogerlo cada
+// vez que se entra a la pestaña. Solo un dato de preferencia, no toca
+// nada del negocio.
+router.put('/tributacion/tipo-empresa', async (req, res) => {
+  const { tipo_empresa } = req.body || {};
+  if (!TIPOS_EMPRESA.includes(tipo_empresa)) {
+    return res.status(400).json({ error: 'Tipo de empresa no válido.' });
+  }
+  await db.prepare(`
+    INSERT INTO parametros (clave, valor, actualizado_en)
+    VALUES (?, ?, now())
+    ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor, actualizado_en = now()
+    RETURNING clave
+  `).run(CLAVE_TIPO_EMPRESA, tipo_empresa);
+  res.json({ ok: true });
+});
+
+// El cálculo en sí: saca todas las bases de lo que YA está registrado
+// en el sistema (nada se vuelve a teclear) y aplica los tributos del
+// régimen elegido.
+router.get('/tributacion', async (req, res) => {
+  const mapaParametros = await leerParametrosTributarios();
+  const tipoEmpresa = TIPOS_EMPRESA.includes(req.query.tipo_empresa)
+    ? req.query.tipo_empresa
+    : (mapaParametros[CLAVE_TIPO_EMPRESA] || 'microempresa');
+
+  const periodo = ['mes', 'trimestre', 'ano', 'rango'].includes(req.query.periodo)
+    ? req.query.periodo
+    : 'mes';
+
+  let desde, hasta;
+  if (periodo === 'rango') {
+    desde = req.query.desde || null;
+    hasta = req.query.hasta || null;
+    if (!desde || !hasta) {
+      return res.status(400).json({ error: 'Para un rango personalizado indique desde y hasta.' });
+    }
+  } else {
+    const { hoy } = await db.prepare(
+      `SELECT (now() AT TIME ZONE 'America/Havana')::date::text AS hoy`
+    ).get();
+    ({ desde, hasta } = limitesPeriodo(periodo, hoy));
+  }
+
+  // ---------- Ventas brutas + ganancia (ingreso - costo) del período ----------
+  const ventas = await db.prepare(`
+    SELECT COALESCE(SUM(ingreso),0) AS ingreso,
+           COALESCE(SUM(costo),0)   AS costo,
+           COALESCE(SUM(ganancia),0) AS ganancia
+    FROM contabilidad_registros
+    WHERE tipo = 'venta'
+      AND (fecha AT TIME ZONE 'America/Havana')::date BETWEEN ? AND ?
+  `).get(desde, hasta);
+
+  // ---------- Gastos deducibles del período, desglosados por categoría ----------
+  const gastosPorCategoria = await db.prepare(`
+    SELECT categoria, COALESCE(SUM(monto),0) AS total, array_agg(DISTINCT moneda) AS monedas
+    FROM gastos
+    WHERE (fecha AT TIME ZONE 'America/Havana')::date BETWEEN ? AND ?
+    GROUP BY categoria
+    ORDER BY total DESC
+  `).all(desde, hasta);
+
+  const gastosTotal = Number(
+    gastosPorCategoria.reduce((s, g) => s + Number(g.total), 0).toFixed(2)
+  );
+  const monedasMezcladas = gastosPorCategoria.some(
+    (g) => Array.isArray(g.monedas) && g.monedas.length > 1
+  ) || gastosPorCategoria.some((g) => g.monedas && g.monedas[0] && g.monedas[0] !== 'CUP');
+
+  // ---------- Nómina (para la seguridad social): gastos cuya categoría ----------
+  // suene a nómina/salario/sueldo, sin importar mayúsculas ni acentos.
+  const nomina = await db.prepare(`
+    SELECT COALESCE(SUM(monto),0) AS total
+    FROM gastos
+    WHERE (fecha AT TIME ZONE 'America/Havana')::date BETWEEN ? AND ?
+      AND translate(lower(categoria), 'áéíóúñ', 'aeioun') ~ '(nomina|salario|sueldo)'
+  `).get(desde, hasta);
+
+  // ---------- Compras (informativo: hoy no hay pantalla que las registre) ----------
+  const compras = await db.prepare(`
+    SELECT COALESCE(SUM(costo_total),0) AS total, COUNT(*) AS cantidad
+    FROM compras
+    WHERE (fecha_llegada AT TIME ZONE 'America/Havana')::date BETWEEN ? AND ?
+  `).get(desde, hasta);
+
+  // ---------- Producción (informativo) ----------
+  const produccion = await db.prepare(`
+    SELECT COALESCE(SUM(costo_total),0) AS total, COUNT(*) AS cantidad
+    FROM producciones
+    WHERE (fecha AT TIME ZONE 'America/Havana')::date BETWEEN ? AND ?
+  `).get(desde, hasta);
+
+  const ventasBrutas = Number(Number(ventas.ingreso).toFixed(2));
+  const gananciaVentas = Number(Number(ventas.ganancia).toFixed(2));
+  const utilidadNeta = Number((gananciaVentas - gastosTotal).toFixed(2));
+  const baseImponible = Number(Math.max(0, utilidadNeta).toFixed(2));
+  const nominaTotal = Number(Number(nomina.total).toFixed(2));
+
+  const bases = {
+    utilidad_neta: baseImponible,
+    ventas_brutas: ventasBrutas,
+    nomina: nominaTotal,
+  };
+
+  const regimenCombinado = combinarConParametros(mapaParametros)[tipoEmpresa];
+  const { tributos, total_tributos } = calcularTributosConRegimen(regimenCombinado, bases);
+
+  // ---------- Advertencias: honestas sobre lo que falta por registrar ----------
+  const advertencias = [AVISO_LEGAL];
+  if (nominaTotal === 0) {
+    advertencias.push(
+      'No hay gastos registrados con categoría de nómina/salario/sueldo en este período: ' +
+      'la Contribución a la Seguridad Social se está calculando en 0. Para que compute, ' +
+      'registre la nómina como gasto (pestaña Gastos) con esa categoría.'
+    );
+  }
+  if (compras.cantidad === 0) {
+    advertencias.push(
+      'La tabla de compras todavía no se alimenta desde ninguna pantalla del sistema, ' +
+      'así que el costo de mercancía comprada en el período no está reflejado aparte ' +
+      '(solo se ve indirectamente, vía el costo de lo ya vendido).'
+    );
+  }
+  if (monedasMezcladas) {
+    advertencias.push(
+      'Hay gastos registrados en más de una moneda; se sumaron los montos sin convertir, ' +
+      'lo que puede distorsionar el total de gastos deducibles.'
+    );
+  }
+  if (utilidadNeta < 0) {
+    advertencias.push(
+      'El período cerró con pérdida (utilidad neta negativa): no se calculan tributos ' +
+      'sobre utilidades cuando no hay ganancia.'
+    );
+  }
+
+  res.json({
+    ventas_brutas: ventasBrutas,
+    gastos_deducibles: {
+      total: gastosTotal,
+      por_categoria: gastosPorCategoria.map((g) => ({
+        categoria: g.categoria || '(sin categoría)',
+        total: Number(Number(g.total).toFixed(2)),
+      })),
+    },
+    utilidad_neta: utilidadNeta,
+    base_imponible: baseImponible,
+    tributos,
+    total_tributos,
+    informativo: {
+      compras_registradas: Number(Number(compras.total).toFixed(2)),
+      produccion_registrada: Number(Number(produccion.total).toFixed(2)),
+      nomina_registrada: nominaTotal,
+    },
+    resumen: {
+      periodo,
+      desde,
+      hasta,
+      tipo_empresa: tipoEmpresa,
+      regimen_nombre: regimenCombinado.nombre,
+    },
+    advertencias,
+  });
 });
 
 export default router;

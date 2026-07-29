@@ -445,3 +445,86 @@ ALTER TABLE ventas ADD COLUMN IF NOT EXISTS metodo_pago TEXT;
 -- después se borre o se renombre el producto.
 ALTER TABLE ventas_detalle DROP CONSTRAINT IF EXISTS ventas_detalle_producto_id_fkey;
 ALTER TABLE ventas_detalle ADD COLUMN IF NOT EXISTS producto_nombre TEXT;
+
+-- ============================================================
+--  Transferencias entre áreas (almacén → almacén, almacén → vendedor)
+-- ============================================================
+-- Antes, una salida con destino entraba SOLA en el almacén de destino.
+-- Ahora el destinatario tiene que aceptarla: la mercancía sale del
+-- origen y queda "en tránsito" hasta que la aceptan o la cancelan.
+-- Si se cancela, la mercancía vuelve al origen (no se puede perder).
+CREATE TABLE IF NOT EXISTS transferencias (
+  id SERIAL PRIMARY KEY,
+  producto_id INTEGER NOT NULL REFERENCES productos(id),
+  producto_nombre TEXT,
+  cantidad DOUBLE PRECISION NOT NULL,
+  costo_unitario DOUBLE PRECISION DEFAULT 0,
+  origen_almacen_id INTEGER REFERENCES almacenes(id),
+  origen_almacen_nombre TEXT,
+  -- A dónde va: a otro almacén o a la lista de venta de un vendedor.
+  destino_tipo TEXT NOT NULL CHECK (destino_tipo IN ('almacen', 'ventas')),
+  destino_almacen_id INTEGER REFERENCES almacenes(id),
+  destino_usuario_id INTEGER REFERENCES usuarios(id),
+  destino_nombre TEXT,
+  estado TEXT NOT NULL DEFAULT 'pendiente'
+    CHECK (estado IN ('pendiente', 'aceptada', 'cancelada')),
+  enviado_por INTEGER REFERENCES usuarios(id),
+  enviado_nombre TEXT,
+  fecha_envio TIMESTAMPTZ DEFAULT NOW(),
+  resuelto_por INTEGER REFERENCES usuarios(id),
+  resuelto_nombre TEXT,
+  fecha_resolucion TIMESTAMPTZ,
+  nota TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_transf_estado ON transferencias(estado);
+CREATE INDEX IF NOT EXISTS idx_transf_destino_alm ON transferencias(destino_almacen_id);
+CREATE INDEX IF NOT EXISTS idx_transf_destino_usr ON transferencias(destino_usuario_id);
+
+-- ============================================================
+--  Tasa de cambio del dólar (fuente: API de elTOQUE)
+-- ============================================================
+-- Guarda cada tasa que se logra obtener. El sistema siempre usa la
+-- última válida, así sigue funcionando aunque se caiga la conexión.
+CREATE TABLE IF NOT EXISTS tasas_cambio (
+  id SERIAL PRIMARY KEY,
+  moneda TEXT NOT NULL DEFAULT 'USD',
+  valor DOUBLE PRECISION NOT NULL,
+  fuente TEXT NOT NULL DEFAULT 'eltoque',
+  fecha_tasa TEXT,
+  obtenida_en TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_tasas_moneda_fecha ON tasas_cambio(moneda, obtenida_en DESC);
+
+-- ============================================================
+--  Parámetros del sistema (clave/valor)
+-- ============================================================
+-- Tabla genérica para ajustes que el dueño puede cambiar sin tocar
+-- código: margen de venta en USD, tipo de empresa para tributación,
+-- porcentajes de impuestos que se aparten de los de fábrica, etc.
+CREATE TABLE IF NOT EXISTS parametros (
+  clave TEXT PRIMARY KEY,
+  valor TEXT,
+  actualizado_en TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
+--  Nómina (salarios del personal)
+-- ============================================================
+-- Hacía falta para calcular la contribución a la seguridad social:
+-- sin salarios registrados ese tributo salía siempre en cero.
+-- Cada pago de nómina genera además su fila en "gastos" (categoría
+-- 'nomina') y su egreso en caja, para no llevar dos contabilidades
+-- distintas: "gastos" sigue siendo la única fuente de lo deducible.
+CREATE TABLE IF NOT EXISTS nomina (
+  id SERIAL PRIMARY KEY,
+  empleado TEXT NOT NULL,
+  cargo TEXT,
+  salario DOUBLE PRECISION NOT NULL,
+  periodo TEXT,                 -- 'AAAA-MM', el mes que se paga
+  fecha_pago TIMESTAMPTZ DEFAULT NOW(),
+  moneda TEXT DEFAULT 'CUP',
+  gasto_id INTEGER REFERENCES gastos(id),
+  usuario_id INTEGER REFERENCES usuarios(id),
+  nota TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_nomina_periodo ON nomina(periodo);

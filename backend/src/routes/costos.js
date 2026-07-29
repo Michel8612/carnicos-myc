@@ -15,7 +15,44 @@ import { requiereSesion } from '../middleware/auth.js';
 const router = Router();
 router.use(requiereSesion);
 
-const CATEGORIAS = ['directo', 'indirecto', 'fijo', 'combustible'];
+// Las 4 primeras son las de siempre (no se tocan, hay datos viejos con
+// esas categorías). Las de abajo se añaden para que el gasto real del
+// negocio quepa en el sistema: sin ellas no había dónde meter ni la
+// electricidad ni el alquiler, y el motor tributario nunca encontraba
+// nómina (así que la Contribución a la Seguridad Social siempre daba 0).
+// 'nomina' en particular es la que lee backend/src/routes/contabilidad.js
+// (ruta /tributacion) para calcular esa contribución: por eso su clave
+// debe seguir siendo exactamente esta cadena.
+const CATEGORIAS = [
+  'directo', 'indirecto', 'fijo', 'combustible',
+  'nomina', 'electricidad', 'alquiler', 'materia_prima',
+  'transporte', 'servicios', 'mantenimiento', 'impuestos', 'otros',
+];
+
+// Etiquetas legibles para pintar el <select> de la pantalla de Gastos
+// sin tener que duplicar esta lista en el HTML.
+const ETIQUETAS_CATEGORIA = {
+  directo: 'Costo directo',
+  indirecto: 'Costo indirecto',
+  fijo: 'Gasto fijo',
+  combustible: 'Combustible',
+  nomina: 'Nómina (salarios)',
+  electricidad: 'Electricidad',
+  alquiler: 'Alquiler',
+  materia_prima: 'Materia prima',
+  transporte: 'Transporte',
+  servicios: 'Servicios',
+  mantenimiento: 'Mantenimiento',
+  impuestos: 'Impuestos',
+  otros: 'Otros',
+};
+
+// Categorías disponibles para el <select> del formulario de gastos.
+// Un solo lugar de verdad: si se añade una categoría arriba, aparece
+// aquí solo, sin tocar el HTML.
+router.get('/categorias', async (req, res) => {
+  res.json(CATEGORIAS.map((clave) => ({ clave, etiqueta: ETIQUETAS_CATEGORIA[clave] || clave })));
+});
 
 // ------------------------------------------------------------
 //  Registrar un gasto suelto
@@ -66,6 +103,128 @@ router.get('/gastos', async (req, res) => {
   `).all(mes);
 
   res.json({ filas, por_moneda: porMoneda });
+});
+
+// ------------------------------------------------------------
+//  Nómina
+//
+//  IMPORTANTE (no cambiarlo sin pensar dos veces): "gastos" es la ÚNICA
+//  fuente de lo deducible. La tabla "nomina" solo guarda el detalle por
+//  empleado (quién cobró qué). Por eso cada pago de nómina crea, en UNA
+//  transacción, su gasto (categoria 'nomina'), su egreso en caja y su
+//  fila de detalle en "nomina" enlazada al gasto por gasto_id. Así el
+//  mismo salario nunca se cuenta dos veces.
+// ------------------------------------------------------------
+
+const FORMATO_PERIODO = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+async function periodoActualHavana() {
+  const { periodo } = await db.prepare(
+    `SELECT to_char(now() AT TIME ZONE 'America/Havana', 'YYYY-MM') AS periodo`
+  ).get();
+  return periodo;
+}
+
+router.post('/nomina', async (req, res) => {
+  const { empleado, cargo, salario, periodo, moneda, nota } = req.body;
+
+  if (!empleado || !String(empleado).trim()) {
+    return res.status(400).json({ error: 'Indique el nombre del empleado.' });
+  }
+  const salarioNum = Number(salario);
+  if (!Number.isFinite(salarioNum) || salarioNum <= 0) {
+    return res.status(400).json({ error: 'El salario debe ser un número mayor que cero.' });
+  }
+  let periodoFinal = periodo;
+  if (!periodoFinal) {
+    periodoFinal = await periodoActualHavana();
+  } else if (!FORMATO_PERIODO.test(periodoFinal)) {
+    return res.status(400).json({ error: 'El período debe tener formato AAAA-MM (ej. 2026-07).' });
+  }
+  const mon = ['CUP', 'USD', 'MLC'].includes(moneda) ? moneda : 'CUP';
+  const concepto = `Nómina: ${empleado} (${periodoFinal})`;
+
+  const tx = db.transaction(async () => {
+    const gasto = await db.prepare(`
+      INSERT INTO gastos (categoria, concepto, monto, moneda, origen_tipo, usuario_id, nota)
+      VALUES ('nomina', ?, ?, ?, 'nomina', ?, ?)
+    `).run(concepto, salarioNum, mon, req.usuario.id, nota || null);
+
+    // Mismo patrón que POST /gastos: todo gasto se refleja también en caja.
+    await db.prepare(`
+      INSERT INTO caja (tipo, concepto, monto, moneda, origen_tipo, origen_id, usuario_id)
+      VALUES ('egreso', ?, ?, ?, 'gasto', ?, ?)
+    `).run(concepto, salarioNum, mon, gasto.lastInsertRowid, req.usuario.id);
+
+    const fila = await db.prepare(`
+      INSERT INTO nomina (empleado, cargo, salario, periodo, moneda, gasto_id, usuario_id, nota)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(empleado, cargo || null, salarioNum, periodoFinal, mon, gasto.lastInsertRowid, req.usuario.id, nota || null);
+
+    return fila.lastInsertRowid;
+  });
+
+  res.json({ ok: true, id: await tx() });
+});
+
+// Filas del período pedido (o de los últimos 12 meses si no se indica),
+// con el total POR MONEDA (mismo criterio que /gastos: nunca se mezclan).
+router.get('/nomina', async (req, res) => {
+  const periodo = req.query.periodo;
+  let filas, porMoneda;
+
+  if (periodo) {
+    if (!FORMATO_PERIODO.test(periodo)) {
+      return res.status(400).json({ error: 'El período debe tener formato AAAA-MM (ej. 2026-07).' });
+    }
+    filas = await db.prepare(
+      'SELECT * FROM nomina WHERE periodo = ? ORDER BY fecha_pago DESC'
+    ).all(periodo);
+    porMoneda = await db.prepare(`
+      SELECT moneda, COALESCE(SUM(salario), 0) AS total, COUNT(*) AS cantidad
+      FROM nomina WHERE periodo = ? GROUP BY moneda
+    `).all(periodo);
+  } else {
+    // Últimos 12 meses: comparación de texto 'YYYY-MM' válida porque el
+    // formato es siempre año de 4 dígitos + mes de 2 dígitos con cero.
+    const desde = await db.prepare(
+      `SELECT to_char((now() AT TIME ZONE 'America/Havana') - interval '11 months', 'YYYY-MM') AS p`
+    ).get();
+    filas = await db.prepare(
+      'SELECT * FROM nomina WHERE periodo >= ? ORDER BY fecha_pago DESC'
+    ).all(desde.p);
+    porMoneda = await db.prepare(`
+      SELECT moneda, COALESCE(SUM(salario), 0) AS total, COUNT(*) AS cantidad
+      FROM nomina WHERE periodo >= ? GROUP BY moneda
+    `).all(desde.p);
+  }
+
+  res.json({ filas, por_moneda: porMoneda });
+});
+
+// Borra el pago de nómina Y su gasto asociado Y su egreso de caja, para
+// que no quede un gasto fantasma inflando lo deducible (y de paso la
+// Contribución a la Seguridad Social, que se calcula sobre esos gastos).
+router.delete('/nomina/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  const fila = await db.prepare('SELECT * FROM nomina WHERE id = ?').get(id);
+  if (!fila) return res.status(404).json({ error: 'No existe ese pago de nómina.' });
+
+  await db.transaction(async () => {
+    // Orden obligatorio: "nomina" tiene un FK hacia "gastos" (gasto_id),
+    // así que hay que borrar primero la fila de nomina y solo después
+    // el gasto; si no, Postgres rechaza el DELETE de gastos por la
+    // referencia todavía viva.
+    await db.prepare('DELETE FROM nomina WHERE id = ?').run(id);
+    if (fila.gasto_id) {
+      await db.prepare(
+        "DELETE FROM caja WHERE origen_tipo = 'gasto' AND origen_id = ?"
+      ).run(fila.gasto_id);
+      await db.prepare('DELETE FROM gastos WHERE id = ?').run(fila.gasto_id);
+    }
+  })();
+
+  res.json({ ok: true });
 });
 
 // ------------------------------------------------------------

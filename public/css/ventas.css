@@ -192,7 +192,18 @@ h1, h2 {
 
 .cat-nombre { font-size: 13.5px; font-weight: bold; color: #333; min-height: 34px; }
 .cat-precio { color: #2196F3; font-weight: bold; font-size: 15px; margin-top: 2px; }
+/* El CUP manda; el USD va debajo, discreto (más chico y gris). */
+.cat-precio-usd { color: #78909c; font-size: 11px; margin-top: 1px; }
 .cat-exist { color: #777; font-size: 11.5px; margin-top: 2px; }
+
+/* Línea que cita la fuente de la tasa de cambio (exigido por elTOQUE).
+   Discreta: texto chico y gris, nunca una alerta. */
+.tasas-etiqueta {
+  text-align: center;
+  color: #90a4ae;
+  font-size: 12px;
+  margin: 0 0 10px;
+}
 
 /* Botón flotante del carrito (esquina inferior derecha del catálogo).
    Va dentro de #pCatalogo: si la pestaña no está activa, no se ve. */
@@ -328,6 +339,8 @@ h1, h2 {
   font-size: 15px;
 }
 .carrito-total-fila b { color: #2196F3; font-size: 20px; }
+/* Equivalente en USD del total, debajo del total en CUP: discreto. */
+.carrito-total-usd { text-align: right; color: #78909c; font-size: 11.5px; margin-top: 2px; }
 
 .carrito-acciones { display: flex; gap: 10px; margin-top: 12px; }
 .carrito-acciones button {
