@@ -64,7 +64,20 @@ function requiereSesion() {
   if (!getToken()) { location.href = 'index.html'; return false; }
   return true;
 }
-function logout() { clearToken(); location.href = 'index.html'; }
+// Cerrar sesión: primero se avisa al servidor para que marque la sesión
+// como cerrada y quede el rastro en auditoría; después se limpia aquí.
+// Si el aviso falla (sin red, token ya vencido) se limpia igual y se sale:
+// al usuario NUNCA se le puede quedar la sesión pegada por un fallo de
+// conexión — aquí la conexión se cae a menudo.
+async function logout() {
+  try {
+    await apiFetch('/auth/logout', { method: 'POST' });
+  } catch (e) {
+    // Da igual por qué falló: la salida no se puede bloquear.
+  }
+  clearToken();
+  location.href = 'index.html';
+}
 
 // ============================================================
 //  Roles y control de acceso
@@ -226,6 +239,53 @@ const API = {
   // --- Tributación ---
   tributacion: (p) => apiFetch('/contabilidad/tributacion?' + new URLSearchParams(p).toString()),
   regimenesTributarios: () => apiFetch('/contabilidad/tributacion/regimenes'),
+  // Régimen "Otro": porcentajes que define el propio usuario.
+  regimenPersonalizado: () => apiFetch('/contabilidad/tributacion/personalizado'),
+  guardarRegimenPersonalizado: (d) => apiFetch('/contabilidad/tributacion/personalizado', { method: 'PUT', body: JSON.stringify(d) }),
+  // Correcciones manuales sobre cifras calculadas (quedan auditadas).
+  correccionesTributacion: (p) => apiFetch('/contabilidad/tributacion/correcciones?' + new URLSearchParams(p || {}).toString()),
+  corregirTributacion: (d) => apiFetch('/contabilidad/tributacion/correcciones', { method: 'POST', body: JSON.stringify(d) }),
+  anularCorreccionTributacion: (id) => apiFetch(`/contabilidad/tributacion/correcciones/${id}`, { method: 'DELETE' }),
+
+  // --- Gastos: borrado y categorías configurables ---
+  borrarGasto: (id, motivo) => apiFetch(`/costos/gastos/${id}`, { method: 'DELETE', body: JSON.stringify({ motivo }) }),
+  crearCategoriaGasto: (d) => apiFetch('/costos/categorias', { method: 'POST', body: JSON.stringify(d) }),
+  borrarCategoriaGasto: (clave) => apiFetch(`/costos/categorias/${encodeURIComponent(clave)}`, { method: 'DELETE' }),
+
+  // --- Historiales protegidos ---
+  // El libro contable lo puede borrar el dueño; contabilidad necesita
+  // que un administrador preste su permiso (reautenticación).
+  borrarLibroAutorizado: (d) => apiFetch('/contabilidad/libro/borrar-autorizado', { method: 'POST', body: JSON.stringify(d) }),
+  borrarMovimientoAlmacen: (id, motivo) => apiFetch(`/inventario/movimientos/${id}`, { method: 'DELETE', body: JSON.stringify({ motivo }) }),
+  reautenticar: (usuario, clave) => apiFetch('/auth/reautenticar', { method: 'POST', body: JSON.stringify({ usuario, clave }) }),
+
+  // --- Sesiones ---
+  sesiones: () => apiFetch('/auth/sesiones'),
+  cerrarSesionDe: (id) => apiFetch(`/auth/sesiones/${id}/cerrar`, { method: 'POST' }),
+
+  // --- Auditoría ---
+  auditoria: (f) => apiFetch('/auditoria?' + new URLSearchParams(f || {}).toString()),
+  auditoriaFiltros: () => apiFetch('/auditoria/filtros'),
+
+  // --- Configuración fiscal de la empresa ---
+  empresa: () => apiFetch('/empresa'),
+  guardarEmpresa: (d) => apiFetch('/empresa', { method: 'PUT', body: JSON.stringify(d) }),
+
+  // --- Cuentas bancarias y conciliación ---
+  cuentasBancarias: () => apiFetch('/bancos/cuentas'),
+  crearCuentaBancaria: (d) => apiFetch('/bancos/cuentas', { method: 'POST', body: JSON.stringify(d) }),
+  actualizarCuentaBancaria: (id, d) => apiFetch(`/bancos/cuentas/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
+  borrarCuentaBancaria: (id) => apiFetch(`/bancos/cuentas/${id}`, { method: 'DELETE' }),
+  movimientosBancarios: (f) => apiFetch('/bancos/movimientos?' + new URLSearchParams(f || {}).toString()),
+  crearMovimientoBancario: (d) => apiFetch('/bancos/movimientos', { method: 'POST', body: JSON.stringify(d) }),
+  conciliarMovimientoBancario: (id, d) => apiFetch(`/bancos/movimientos/${id}/conciliar`, { method: 'POST', body: JSON.stringify(d) }),
+  pasarelasPago: () => apiFetch('/bancos/pasarelas'),
+
+  // --- Documentos legales ---
+  estadoLegal: () => apiFetch('/legal/estado'),
+  documentosLegales: () => apiFetch('/legal/documentos'),
+  aceptarLegal: (versiones) => apiFetch('/legal/aceptar', { method: 'POST', body: JSON.stringify({ versiones }) }),
+  guardarDocumentoLegal: (d) => apiFetch('/legal/documentos', { method: 'POST', body: JSON.stringify(d) }),
 };
 
 // Exponer en window para las páginas (scripts clásicos).

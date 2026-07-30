@@ -10,6 +10,7 @@ import { Router } from 'express';
 import db from '../db/index.js';
 import { requiereSesion } from '../middleware/auth.js';
 import { anotar } from '../libro.js';
+import { auditar } from '../auditoria.js';
 
 const router = Router();
 router.use(requiereSesion);
@@ -22,6 +23,13 @@ router.use(requiereSesion);
 // de almacen_central quede en un solo lugar (GET /existencias,
 // GET /almacenes y POST /movimientos ya la usan a través de ella).
 const ES_ALMACENERO_LIMITADO = (rol) => rol === 'almacen' || rol === 'almacenero';
+
+// Quién puede borrar una línea del HISTORIAL de movimientos: solo el
+// administrador real del negocio (dueño/admin/proveedor —soporte, mismo
+// trato que en el resto del sistema—). A propósito NO incluye
+// 'almacen_central': mover mercancía de cualquier almacén es una cosa,
+// borrar un registro de auditoría del historial es otra muy distinta.
+const ES_ADMIN_TOTAL = (rol) => rol === 'dueno' || rol === 'admin' || rol === 'proveedor';
 
 // Devuelve el almacen_id al que hay que limitar las consultas, o null
 // si no hay límite (dueño / admin / proveedor / almacen_central / etc.).
@@ -367,6 +375,113 @@ router.post('/movimientos', async (req, res) => {
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
+});
+
+// ============================================================
+//  Historial de movimientos del almacén
+// ============================================================
+
+// Lista de movimientos (entradas/salidas/traslados/ajustes/producción)
+// con filtros opcionales por almacén y por fecha, para la pantalla de
+// Almacén. Un almacenero limitado solo ve los de SU almacén (igual que
+// en /existencias); el resto puede filtrar por ?almacen_id= o ver todos.
+router.get('/movimientos', async (req, res) => {
+  const limiteAlmacen = almacenDeLaSesion(req);
+  const cond = [];
+  const params = [];
+
+  if (limiteAlmacen) {
+    cond.push('m.almacen_id = ?');
+    params.push(limiteAlmacen);
+  } else if (req.query.almacen_id) {
+    cond.push('m.almacen_id = ?');
+    params.push(Number(req.query.almacen_id));
+  }
+  if (req.query.desde) {
+    cond.push('m.fecha >= ?');
+    params.push(req.query.desde);
+  }
+  if (req.query.hasta) {
+    cond.push('m.fecha <= ?');
+    params.push(req.query.hasta + ' 23:59:59');
+  }
+
+  const where = cond.length ? `WHERE ${cond.join(' AND ')}` : '';
+  const filas = await db.prepare(`
+    SELECT m.id, m.fecha, m.tipo, m.cantidad, m.nota, m.origen_tipo,
+           p.nombre AS producto, COALESCE(u.abreviatura,'') AS unidad,
+           a.nombre AS almacen, us.nombre AS usuario_nombre
+    FROM movimientos m
+    JOIN productos p ON p.id = m.producto_id
+    LEFT JOIN unidades u ON u.id = p.unidad_id
+    LEFT JOIN almacenes a ON a.id = m.almacen_id
+    LEFT JOIN usuarios us ON us.id = m.usuario_id
+    ${where}
+    ORDER BY m.fecha DESC
+    LIMIT 300
+  `).all(...params);
+
+  res.json(filas);
+});
+
+// Borrar una línea del historial de movimientos.
+//
+// DECISIÓN IMPORTANTE (a propósito, no un olvido): borrar aquí NO
+// deshace el movimiento ni toca `existencias`. Es el MISMO criterio que
+// ya sigue este sistema con el historial de ventas y con el libro
+// contable: borrar del historial no deshace nada, solo quita la línea
+// del registro. Si además se devolviera/quitara cantidad de
+// existencias, el inventario dejaría de cuadrar con la realidad física
+// del almacén (desde que se hizo el movimiento puede haberse contado,
+// vendido o movido más mercancía, y "deshacer" ya no reflejaría nada
+// real). Por eso este DELETE es puramente un borrado de auditoría.
+//
+// Solo dueño/admin/proveedor (ver ES_ADMIN_TOTAL). Motivo obligatorio.
+// Queda registrado en auditoría con el movimiento completo en "antes",
+// para poder reconstruirlo a mano si hiciera falta.
+router.delete('/movimientos/:id', async (req, res) => {
+  if (!ES_ADMIN_TOTAL(req.usuario.rol)) {
+    return res.status(403).json({
+      error: 'Solo un administrador puede borrar líneas del historial de almacén.',
+    });
+  }
+
+  const id = Number(req.params.id);
+  const motivo = req.body?.motivo;
+  if (!motivo || !String(motivo).trim()) {
+    return res.status(400).json({ error: 'Indique el motivo del borrado.' });
+  }
+
+  const mov = await db.prepare('SELECT * FROM movimientos WHERE id = ?').get(id);
+  if (!mov) return res.status(404).json({ error: 'Ese movimiento no existe.' });
+
+  try {
+    await db.prepare('DELETE FROM movimientos WHERE id = ?').run(id);
+  } catch (err) {
+    // Defensivo: si algún día otra tabla llega a depender de
+    // movimientos.id por clave foránea, se explica en español en vez
+    // de reventar con el error crudo de Postgres.
+    if (err.code === '23503') {
+      return res.status(400).json({
+        error: 'Este movimiento tiene otros registros que dependen de él y no se puede borrar.',
+      });
+    }
+    throw err;
+  }
+
+  // OJO: NO se toca `existencias` — ver la nota de más arriba.
+  await auditar({
+    modulo: 'almacen',
+    accion: 'eliminar',
+    req,
+    entidad: 'movimientos',
+    entidad_id: id,
+    descripcion: `Borrado de línea del historial de almacén (${mov.tipo}, ${mov.cantidad} unidades). No afecta existencias.`,
+    antes: mov,
+    motivo: String(motivo).trim(),
+  });
+
+  res.json({ ok: true });
 });
 
 // ============================================================

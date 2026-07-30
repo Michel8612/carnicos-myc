@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Documentos legales - Cárnicos M&C</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    /* Header oscuro, mismo patrón que las demás pantallas internas (ver auditoria.html). */
+    header {
+      text-align: center;
+      padding: 18px 20px 20px;
+      background: #37474f;
+      color: #fff;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+    }
+    .logo-legal {
+      width: 74px; height: 74px; object-fit: contain; display: block;
+      margin: 0 auto 8px auto; background: #fff; border-radius: 50%;
+      padding: 6px; box-shadow: 0 2px 8px rgba(0,0,0,.3);
+    }
+    header h1 { color: #fff; font-size: 24px; letter-spacing: .5px; text-shadow: 0 1px 3px rgba(0,0,0,.4); margin: 6px 0; }
+
+    .legal-wrap { max-width: 900px; margin: 0 auto; padding: 0 12px 40px; }
+    p.legal-sub { text-align: center; font-size: 12.5px; color: #777; margin: 14px 0 0; }
+    .legal-vacio { text-align: center; color: #777; padding: 20px; }
+    #lpCargando { text-align: center; color: #777; padding: 20px; }
+  </style>
+</head>
+
+<body id="legalPagina">
+  <header>
+    <img src="img/logo.png" alt="Cárnicos M&C" class="logo-legal">
+    <h1>Documentos legales</h1>
+    <div class="top-nav">
+      <a href="#" id="navPanel" style="display:none;">← Panel</a>
+      <a href="#" onclick="logout();return false;">Salir</a>
+    </div>
+  </header>
+
+  <main class="legal-wrap">
+    <p class="legal-sub">
+      Términos y Condiciones, Política de Privacidad y Política de Tratamiento de Datos
+      vigentes de Cárnicos M&C.
+    </p>
+
+    <div id="lpCargando">Cargando…</div>
+
+    <!-- Documentos vigentes (pestañas), visible para cualquier sesión -->
+    <div class="legal-pag-caja">
+      <h3>Documentos vigentes</h3>
+      <div class="legal-tabs" id="lpTabs"></div>
+      <div class="legal-contenido" id="lpContenido" style="max-height:none;"></div>
+    </div>
+
+    <!-- Publicar nueva versión: solo dueño/admin (oculto por defecto, lo muestra legal.js) -->
+    <div class="legal-pag-caja" id="lpSeccionPublicar" style="display:none;">
+      <h3>Publicar nueva versión</h3>
+      <p style="font-size:12.5px;color:#777;margin-top:-4px;">
+        Al publicar, la versión anterior de ese tipo deja de ser vigente y todo el
+        personal deberá volver a aceptar la nueva la próxima vez que entre.
+        Nada se borra: queda el historial completo de versiones.
+      </p>
+      <form id="lpForm" class="legal-form">
+        <label for="lpTipo">Tipo de documento</label>
+        <select id="lpTipo" required>
+          <option value="terminos">Términos y Condiciones</option>
+          <option value="privacidad">Política de Privacidad</option>
+          <option value="datos">Política de Tratamiento de Datos</option>
+        </select>
+
+        <label for="lpVersion">Versión nueva (por ejemplo, 1.1)</label>
+        <input type="text" id="lpVersion" required placeholder="1.1">
+
+        <label for="lpTitulo">Título</label>
+        <input type="text" id="lpTitulo" placeholder="Título del documento">
+
+        <label for="lpContenidoNuevo">Contenido</label>
+        <textarea id="lpContenidoNuevo" required placeholder="Escriba aquí el texto completo del documento…"></textarea>
+
+        <button type="submit">Publicar nueva versión</button>
+      </form>
+      <div class="legal-msg-ok" id="lpMsgOk"></div>
+      <div class="modal-err" id="lpErr" style="margin:10px 0 0;"></div>
+    </div>
+
+    <!-- Historial: solo dueño/admin -->
+    <div class="legal-pag-caja" id="lpSeccionHistorial" style="display:none;">
+      <h3>Historial de versiones</h3>
+      <div class="legal-tabla-scroll">
+        <table class="legal-tabla">
+          <thead><tr><th>Documento</th><th>Versión</th><th>Estado</th><th>Publicada</th></tr></thead>
+          <tbody id="lpTbVersiones"></tbody>
+        </table>
+      </div>
+
+      <h3 style="margin-top:20px;">Quién ha aceptado</h3>
+      <div class="legal-tabla-scroll">
+        <table class="legal-tabla">
+          <thead><tr><th>Usuario</th><th>Documento</th><th>Versión</th><th>Fecha</th><th>IP</th></tr></thead>
+          <tbody id="lpTbAceptaciones"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/sonidos.js"></script>
+  <script src="js/legal.js"></script>
+</body>
+</html>

@@ -163,6 +163,42 @@
         </tbody>
       </table>
     </div>
+
+    <!-- Historial de movimientos del almacén (entradas, salidas, ajustes,
+         traslados, producción). La columna de borrado (✕) solo se ve
+         para el administrador: para todos los demás roles ni aparece. -->
+    <div id="historialMovimientos">
+      <h2>Historial de Movimientos</h2>
+      <p style="font-size:13px;color:#666;margin:4px 0 10px;">
+        Borrar una línea de aquí NO devuelve ni quita mercancía del inventario:
+        solo quita el registro del historial.
+      </p>
+      <div class="hm-filtros">
+        <select id="hmFiltroAlmacen">
+          <option value="">Todos los almacenes</option>
+        </select>
+        <input type="date" id="hmFiltroDesde">
+        <input type="date" id="hmFiltroHasta">
+        <button type="button" id="hmBtnFiltrar">Filtrar</button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Producto</th>
+            <th>Almacén</th>
+            <th>Tipo</th>
+            <th>Cantidad</th>
+            <th>Hecho por</th>
+            <th>Nota</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="historialMovimientosList">
+          <!-- Se llena dinámicamente desde API.historialMovimientos() -->
+        </tbody>
+      </table>
+    </div>
   </main>
 
   <script src="js/api.js"></script>

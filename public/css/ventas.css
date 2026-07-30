@@ -357,6 +357,66 @@ h1, h2 {
 .btn-carrito-pagar:hover { background: #256a28; }
 
 /* ============================================================
+   Popup: cantidad a agregar al carrito (desde el catálogo)
+   ============================================================ */
+.mc-prod {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.mc-img {
+  width: 84px;
+  flex: 0 0 84px;
+  margin-bottom: 0;
+}
+.mc-datos { flex: 1; min-width: 0; }
+.mc-nombre { font-weight: bold; font-size: 15.5px; color: #333; word-break: break-word; }
+.mc-precio { color: #2196F3; font-weight: bold; font-size: 15px; margin-top: 2px; }
+.mc-existencia { color: #6a1b9a; font-size: 12.5px; margin-top: 4px; font-weight: bold; }
+
+.mc-cant-fila {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+.mc-paso {
+  width: 42px; height: 42px;
+  flex: 0 0 42px;
+  border: none;
+  border-radius: 10px;
+  background: #e3f2fd;
+  color: #1976D2;
+  font-size: 22px;
+  font-weight: bold;
+  cursor: pointer;
+  line-height: 1;
+}
+.mc-paso:hover { background: #bbdefb; }
+.mc-paso:active { transform: scale(.95); }
+.mc-paso:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+#mcCantidad {
+  flex: 1;
+  text-align: center;
+  font-size: 18px;
+  font-weight: bold;
+  padding: 10px;
+}
+
+.mc-subtotal-fila {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 2px solid #eee;
+  font-size: 15px;
+}
+.mc-subtotal-fila b { color: #2e7d32; font-size: 20px; }
+.mc-subtotal-usd { text-align: right; color: #78909c; font-size: 11.5px; margin-top: 2px; }
+
+/* ============================================================
    Vista Historial de ventas
    ============================================================ */
 .historial-lista { display: flex; flex-direction: column; gap: 14px; }

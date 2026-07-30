@@ -16,13 +16,17 @@
 import { Router } from 'express';
 import db from '../db/index.js';
 import { requiereSesion } from '../middleware/auth.js';
+import { auditar } from '../auditoria.js';
 import {
   REGIMENES,
   TIPOS_EMPRESA,
   CLAVE_TIPO_EMPRESA,
+  BASES_VALIDAS,
+  CLAVE_REGIMEN_OTRO,
   AVISO_LEGAL,
   combinarConParametros,
   calcularTributosConRegimen,
+  regimenOtroDesdeParametros,
 } from '../config/tributacion.js';
 
 const router = Router();
@@ -31,12 +35,48 @@ router.use(requiereSesion);
 const PUEDE_VER = (rol) =>
   ['contabilidad', 'dueno', 'admin', 'proveedor'].includes(rol);
 
+// El historial contable (libro) solo lo borra dueño/admin directamente;
+// contabilidad necesita el permiso prestado de un administrador (ver
+// POST /libro/borrar-autorizado más abajo).
+const ES_ADMIN = (rol) => ['dueno', 'admin', 'proveedor'].includes(rol);
+
 router.use((req, res, next) => {
   if (!PUEDE_VER(req.usuario.rol)) {
     return res.status(403).json({ error: 'Esta sección es de Contabilidad.' });
   }
   next();
 });
+
+// Verifica el permiso temporal que un administrador le prestó a
+// contabilidad (ver POST /auth/reautenticar, en routes/auth.js — de
+// otro agente). Falla CERRADO siempre: si el módulo o la función no
+// existen, si la verificación lanza, o si devuelve { ok:false, ... }
+// (un objeto truthy: OJO, "if (!resultado)" NO basta para detectarlo),
+// se deniega — nunca se abre.
+//
+// verificarAutorizacion(token, accionEsperada) acepta restringir el
+// permiso a una acción concreta (p. ej. 'borrar_libro'), pero
+// API.reautenticar(usuario, clave) en public/js/api.js no expone forma
+// de mandar ese campo `accion` desde aquí, así que el token siempre
+// llega con accion:'general' (el valor por defecto de /auth/reautenticar
+// cuando no se manda). Por eso se verifica sin accionEsperada (null):
+// exigir 'borrar_libro' aquí rechazaría SIEMPRE un token legítimo.
+async function verificarAutorizacionSegura(token) {
+  if (!token) return null;
+  try {
+    const mod = await import('./auth.js');
+    if (typeof mod.verificarAutorizacion !== 'function') {
+      console.error('verificarAutorizacion no existe todavía en routes/auth.js: se deniega (falla cerrado).');
+      return null;
+    }
+    const resultado = mod.verificarAutorizacion(token, null);
+    if (!resultado || resultado.ok !== true) return null;
+    return { id: resultado.autorizadoPorId, nombre: resultado.autorizadoPorNombre };
+  } catch (e) {
+    console.error('No se pudo verificar la autorización prestada (falla cerrado):', e.message);
+    return null;
+  }
+}
 
 // ============================================================
 //  RESUMEN GENERAL — todo en una sola pantalla
@@ -201,19 +241,49 @@ router.get('/libro', async (req, res) => {
   });
 });
 
-// Borrar una línea del libro (a voluntad del contador o del dueño).
+// Borrar una línea del libro. Restringido a dueño/admin: contabilidad
+// solo puede hacerlo con el permiso prestado de un administrador (ver
+// POST /libro/borrar-autorizado). Motivo obligatorio y queda auditado.
 router.delete('/libro/:id', async (req, res) => {
-  await db.prepare('DELETE FROM contabilidad_registros WHERE id = ?').run(Number(req.params.id));
+  if (!ES_ADMIN(req.usuario.rol)) {
+    return res.status(403).json({ error: 'Borrar del libro es solo del dueño/admin. Contabilidad necesita autorización (ver "Borrar con autorización").' });
+  }
+  const { motivo } = req.body || {};
+  if (!motivo || !String(motivo).trim()) {
+    return res.status(400).json({ error: 'Debe indicar el motivo del borrado.' });
+  }
+  const id = Number(req.params.id);
+  const fila = await db.prepare('SELECT * FROM contabilidad_registros WHERE id = ?').get(id);
+  await db.prepare('DELETE FROM contabilidad_registros WHERE id = ?').run(id);
+  await auditar({
+    modulo: 'contabilidad', accion: 'eliminar', req, entidad: 'contabilidad_registros', entidad_id: id,
+    descripcion: `Apunte del libro eliminado${fila ? `: ${fila.tipo} — ${fila.concepto}` : ''}`,
+    antes: fila, motivo: String(motivo).trim(),
+  });
   res.json({ ok: true });
 });
 
 // Borrar varias líneas de una vez (por tipo o por rango de fechas).
+// Mismas reglas que arriba: dueño/admin directo, motivo obligatorio.
 router.post('/libro/borrar', async (req, res) => {
-  const { ids, tipo, desde, hasta } = req.body || {};
+  if (!ES_ADMIN(req.usuario.rol)) {
+    return res.status(403).json({ error: 'Borrar del libro es solo del dueño/admin. Contabilidad necesita autorización (ver "Borrar con autorización").' });
+  }
+  const { ids, tipo, desde, hasta, motivo } = req.body || {};
+  if (!motivo || !String(motivo).trim()) {
+    return res.status(400).json({ error: 'Debe indicar el motivo del borrado.' });
+  }
+  const motivoLimpio = String(motivo).trim();
+
   if (Array.isArray(ids) && ids.length) {
     for (const id of ids) {
       await db.prepare('DELETE FROM contabilidad_registros WHERE id = ?').run(Number(id));
     }
+    await auditar({
+      modulo: 'contabilidad', accion: 'eliminar', req, entidad: 'contabilidad_registros',
+      descripcion: `Borrado por lote de ${ids.length} apunte(s) del libro (por id).`,
+      motivo: motivoLimpio,
+    });
     return res.json({ ok: true, borrados: ids.length });
   }
   const cond = [];
@@ -227,7 +297,64 @@ router.post('/libro/borrar', async (req, res) => {
   const r = await db.prepare(
     `DELETE FROM contabilidad_registros WHERE ${cond.join(' AND ')}`
   ).run(...params);
+  await auditar({
+    modulo: 'contabilidad', accion: 'eliminar', req, entidad: 'contabilidad_registros',
+    descripcion: `Borrado por lote de ${r.changes} apunte(s) del libro (tipo=${tipo || 'todos'}, desde=${desde || '—'}, hasta=${hasta || '—'}).`,
+    motivo: motivoLimpio,
+  });
   res.json({ ok: true, borrados: r.changes });
+});
+
+// Borrado del libro para CONTABILIDAD, con el permiso prestado de un
+// administrador: el frontend ya reautenticó al admin (POST
+// /auth/reautenticar, de otro agente) y manda aquí el permiso
+// temporal ("autorizacion") junto con qué borrar y el motivo. Se
+// verifica con verificarAutorizacionSegura (falla cerrado) y queda
+// auditado con quién autorizó y quién ejecutó.
+router.post('/libro/borrar-autorizado', async (req, res) => {
+  const { ids, tipo, desde, hasta, motivo, autorizacion } = req.body || {};
+  if (!motivo || !String(motivo).trim()) {
+    return res.status(400).json({ error: 'Debe indicar el motivo del borrado.' });
+  }
+  if (!autorizacion) {
+    return res.status(400).json({ error: 'Falta la autorización de un administrador.' });
+  }
+  const admin = await verificarAutorizacionSegura(autorizacion);
+  if (!admin) {
+    return res.status(403).json({
+      error: 'La autorización no es válida, expiró, o no se pudo verificar. Pida a un administrador que la genere de nuevo.',
+    });
+  }
+  const motivoLimpio = String(motivo).trim();
+
+  let borrados = 0;
+  if (Array.isArray(ids) && ids.length) {
+    for (const id of ids) {
+      await db.prepare('DELETE FROM contabilidad_registros WHERE id = ?').run(Number(id));
+    }
+    borrados = ids.length;
+  } else {
+    const cond = [];
+    const params = [];
+    if (tipo && tipo !== 'todos') { cond.push('tipo = ?'); params.push(tipo); }
+    if (desde) { cond.push('fecha >= ?'); params.push(desde); }
+    if (hasta) { cond.push('fecha <= ?'); params.push(hasta + ' 23:59:59'); }
+    if (!cond.length) {
+      return res.status(400).json({ error: 'Indique qué borrar (ids, o tipo/fechas).' });
+    }
+    const r = await db.prepare(
+      `DELETE FROM contabilidad_registros WHERE ${cond.join(' AND ')}`
+    ).run(...params);
+    borrados = r.changes;
+  }
+
+  await auditar({
+    modulo: 'contabilidad', accion: 'eliminar', req, entidad: 'contabilidad_registros',
+    descripcion: `Borrado autorizado del libro: ${borrados} apunte(s) (autorizó ${admin?.nombre || admin?.usuario || admin?.id || 'admin'}).`,
+    motivo: motivoLimpio,
+    autorizadoPor: admin,
+  });
+  res.json({ ok: true, borrados });
 });
 
 // ============================================================
@@ -316,6 +443,152 @@ router.put('/tributacion/tipo-empresa', async (req, res) => {
     ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor, actualizado_en = now()
     RETURNING clave
   `).run(CLAVE_TIPO_EMPRESA, tipo_empresa);
+  res.json({ ok: true });
+});
+
+// ------------------------------------------------------------
+//  Régimen "Otro" — el usuario define a mano sus propios tributos.
+//  El motor de cálculo no cambia: esto solo guarda/lee la definición
+//  en `parametros` con la misma forma que consume
+//  calcularTributosConRegimen (ver regimenOtroDesdeParametros).
+// ------------------------------------------------------------
+router.get('/tributacion/personalizado', async (req, res) => {
+  const mapa = await leerParametrosTributarios();
+  const regimen = regimenOtroDesdeParametros(mapa);
+  res.json({ tributos: regimen.tributos, bases_validas: BASES_VALIDAS });
+});
+
+router.put('/tributacion/personalizado', async (req, res) => {
+  const { tributos } = req.body || {};
+  if (!Array.isArray(tributos)) {
+    return res.status(400).json({ error: 'Indique la lista de tributos.' });
+  }
+  const limpios = [];
+  for (const t of tributos) {
+    const clave = String(t?.clave || '').trim().toLowerCase().replace(/\s+/g, '_');
+    const nombre = String(t?.nombre || '').trim();
+    const base = t?.base;
+    const porcentaje = Number(t?.porcentaje);
+    const minimoExento = Number(t?.minimo_exento);
+    if (!clave || !nombre) {
+      return res.status(400).json({ error: 'Cada tributo necesita clave y nombre.' });
+    }
+    if (!BASES_VALIDAS.includes(base)) {
+      return res.status(400).json({ error: `Base no válida para "${nombre}". Use una de: ${BASES_VALIDAS.join(', ')}.` });
+    }
+    if (!Number.isFinite(porcentaje) || porcentaje < 0) {
+      return res.status(400).json({ error: `El porcentaje de "${nombre}" debe ser un número mayor o igual a cero.` });
+    }
+    limpios.push({
+      clave, nombre, base, porcentaje,
+      minimo_exento: Number.isFinite(minimoExento) && minimoExento > 0 ? minimoExento : 0,
+    });
+  }
+  const claves = limpios.map((t) => t.clave);
+  if (new Set(claves).size !== claves.length) {
+    return res.status(400).json({ error: 'Hay tributos con la misma clave: cada uno debe ser único.' });
+  }
+
+  const mapaAntes = await leerParametrosTributarios();
+  const valorAnterior = mapaAntes[CLAVE_REGIMEN_OTRO] || null;
+  const valorNuevo = JSON.stringify({ tributos: limpios });
+  await db.prepare(`
+    INSERT INTO parametros (clave, valor, actualizado_en)
+    VALUES (?, ?, now())
+    ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor, actualizado_en = now()
+    RETURNING clave
+  `).run(CLAVE_REGIMEN_OTRO, valorNuevo);
+
+  await auditar({
+    modulo: 'tributacion', accion: 'modificar', req, entidad: 'parametros', entidad_id: CLAVE_REGIMEN_OTRO,
+    descripcion: `Régimen tributario "Otro" actualizado (${limpios.length} tributo(s)).`,
+    antes: valorAnterior, despues: valorNuevo,
+  });
+
+  res.json({ ok: true, tributos: limpios });
+});
+
+// ------------------------------------------------------------
+//  Correcciones manuales de cifras calculadas
+//
+//  El cálculo automático es una ayuda, no la última palabra: se puede
+//  sustituir cualquier cifra (ventas brutas, gastos deducibles,
+//  utilidad neta, base imponible, o el importe de un tributo concreto
+//  con la clave "tributo.<clave_tributo>"), siempre con motivo. GET
+//  /tributacion aplica las vigentes (no anuladas) que solapen el
+//  período consultado. Nunca se borran, solo se anulan (anulada=1).
+//
+//  Diseño a propósito: cada corrección es independiente (una capa
+//  sobre el número calculado, no un recálculo en cascada). Así lo que
+//  se ve en pantalla es exactamente lo que el contador escribió, sin
+//  sorpresas de que "se corrigió una cosa y cambiaron otras tres".
+// ------------------------------------------------------------
+const CLAVES_CORREGIBLES = ['ventas_brutas', 'gastos_deducibles', 'utilidad_neta', 'base_imponible'];
+const esClaveCorregible = (clave) =>
+  CLAVES_CORREGIBLES.includes(clave) || /^tributo\.[a-z0-9_]+$/.test(clave || '');
+
+router.get('/tributacion/correcciones', async (req, res) => {
+  const { desde, hasta, incluir_anuladas } = req.query;
+  const cond = [];
+  const params = [];
+  if (desde) { cond.push('periodo_hasta >= ?'); params.push(desde); }
+  if (hasta) { cond.push('periodo_desde <= ?'); params.push(hasta); }
+  if (incluir_anuladas !== '1') cond.push('anulada = 0');
+  const where = cond.length ? 'WHERE ' + cond.join(' AND ') : '';
+  const filas = await db.prepare(`
+    SELECT * FROM tributacion_correcciones ${where} ORDER BY fecha DESC LIMIT 300
+  `).all(...params);
+  res.json(filas);
+});
+
+router.post('/tributacion/correcciones', async (req, res) => {
+  const { periodo_desde, periodo_hasta, clave, etiqueta, valor_anterior, valor_nuevo, motivo } = req.body || {};
+  if (!periodo_desde || !periodo_hasta) {
+    return res.status(400).json({ error: 'Indique el período (desde y hasta) al que aplica la corrección.' });
+  }
+  if (!esClaveCorregible(clave)) {
+    return res.status(400).json({ error: 'Esa cifra no se puede corregir desde aquí.' });
+  }
+  const nuevo = Number(valor_nuevo);
+  if (!Number.isFinite(nuevo)) {
+    return res.status(400).json({ error: 'El nuevo valor debe ser un número.' });
+  }
+  if (!motivo || !String(motivo).trim()) {
+    return res.status(400).json({ error: 'El motivo es obligatorio: explique por qué se corrige esta cifra.' });
+  }
+  const motivoLimpio = String(motivo).trim();
+  const anteriorNum = Number.isFinite(Number(valor_anterior)) ? Number(valor_anterior) : null;
+
+  const r = await db.prepare(`
+    INSERT INTO tributacion_correcciones
+      (periodo_desde, periodo_hasta, clave, etiqueta, valor_anterior, valor_nuevo, motivo, usuario_id, usuario_nombre)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    periodo_desde, periodo_hasta, clave, etiqueta || clave,
+    anteriorNum, nuevo, motivoLimpio, req.usuario.id, req.usuario.usuario || req.usuario.nombre || null,
+  );
+
+  await auditar({
+    modulo: 'tributacion', accion: 'modificar', req, entidad: 'tributacion_correcciones', entidad_id: r.lastInsertRowid,
+    descripcion: `Corrección de "${etiqueta || clave}" para el período ${periodo_desde} a ${periodo_hasta}: ${anteriorNum ?? '—'} → ${nuevo}.`,
+    antes: anteriorNum, despues: nuevo, motivo: motivoLimpio,
+  });
+
+  res.json({ ok: true, id: r.lastInsertRowid });
+});
+
+router.delete('/tributacion/correcciones/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  const fila = await db.prepare('SELECT * FROM tributacion_correcciones WHERE id = ?').get(id);
+  if (!fila) return res.status(404).json({ error: 'No existe esa corrección.' });
+  if (fila.anulada) return res.json({ ok: true, ya_estaba_anulada: true });
+
+  await db.prepare('UPDATE tributacion_correcciones SET anulada = 1 WHERE id = ?').run(id);
+  await auditar({
+    modulo: 'tributacion', accion: 'modificar', req, entidad: 'tributacion_correcciones', entidad_id: id,
+    descripcion: `Corrección de "${fila.etiqueta || fila.clave}" anulada (quedaba: ${fila.valor_nuevo}).`,
+    antes: { anulada: 0 }, despues: { anulada: 1 },
+  });
   res.json({ ok: true });
 });
 
@@ -410,8 +683,61 @@ router.get('/tributacion', async (req, res) => {
   const regimenCombinado = combinarConParametros(mapaParametros)[tipoEmpresa];
   const { tributos, total_tributos } = calcularTributosConRegimen(regimenCombinado, bases);
 
+  // ---------- Aplicar correcciones manuales vigentes del período ----------
+  // (ver POST /tributacion/correcciones más arriba). Cada corrección es
+  // una capa independiente sobre el número calculado: no se recalcula
+  // nada en cascada a partir de ella.
+  const correccionesFilas = await db.prepare(`
+    SELECT * FROM tributacion_correcciones
+    WHERE anulada = 0 AND periodo_desde <= ? AND periodo_hasta >= ?
+    ORDER BY fecha DESC
+  `).all(hasta, desde);
+
+  // Si varias correcciones para la misma clave se solapan con el
+  // período, se queda con la más reciente (la consulta ya viene
+  // ordenada por fecha DESC, así que el primer hallazgo gana).
+  const correccionPorClave = {};
+  for (const c of correccionesFilas) {
+    if (!(c.clave in correccionPorClave)) correccionPorClave[c.clave] = c;
+  }
+  const aplicarCorreccion = (claveOriginal, valorOriginal) => {
+    const c = correccionPorClave[claveOriginal];
+    if (!c) return { valor: valorOriginal, correccion: null };
+    return {
+      valor: Number(c.valor_nuevo),
+      correccion: {
+        id: c.id,
+        valor_anterior: c.valor_anterior,
+        valor_nuevo: c.valor_nuevo,
+        motivo: c.motivo,
+        usuario_nombre: c.usuario_nombre,
+        fecha: c.fecha,
+      },
+    };
+  };
+
+  const ventasBrutasC = aplicarCorreccion('ventas_brutas', ventasBrutas);
+  const gastosTotalC = aplicarCorreccion('gastos_deducibles', gastosTotal);
+  const utilidadNetaC = aplicarCorreccion('utilidad_neta', utilidadNeta);
+  const baseImponibleC = aplicarCorreccion('base_imponible', baseImponible);
+
+  const tributosFinal = tributos.map((t) => {
+    const c = aplicarCorreccion(`tributo.${t.clave}`, t.importe);
+    return { ...t, importe: c.valor, corregido: !!c.correccion, correccion: c.correccion };
+  });
+  const totalTributosFinal = Number(
+    tributosFinal.reduce((s, t) => s + Number(t.importe), 0).toFixed(2)
+  );
+
   // ---------- Advertencias: honestas sobre lo que falta por registrar ----------
   const advertencias = [AVISO_LEGAL];
+  if (correccionesFilas.length) {
+    advertencias.push(
+      'Hay cifras corregidas a mano en este período (marcadas con el lapicito). Cada corrección ' +
+      'es independiente: los demás cálculos automáticos no se recalculan a partir de ella. ' +
+      'Revise que el conjunto siga siendo coherente.'
+    );
+  }
   if (nominaTotal === 0) {
     advertencias.push(
       'No hay gastos registrados con categoría de nómina/salario/sueldo en este período: ' +
@@ -440,18 +766,29 @@ router.get('/tributacion', async (req, res) => {
   }
 
   res.json({
-    ventas_brutas: ventasBrutas,
+    ventas_brutas: ventasBrutasC.valor,
     gastos_deducibles: {
-      total: gastosTotal,
+      total: gastosTotalC.valor,
       por_categoria: gastosPorCategoria.map((g) => ({
         categoria: g.categoria || '(sin categoría)',
         total: Number(Number(g.total).toFixed(2)),
       })),
+      corregido: !!gastosTotalC.correccion,
+      correccion: gastosTotalC.correccion,
     },
-    utilidad_neta: utilidadNeta,
-    base_imponible: baseImponible,
-    tributos,
-    total_tributos,
+    utilidad_neta: utilidadNetaC.valor,
+    base_imponible: baseImponibleC.valor,
+    tributos: tributosFinal,
+    total_tributos: totalTributosFinal,
+    // Metadatos de qué cifras están corregidas a mano, con motivo y
+    // autor, para que la pantalla lo muestre claramente (que no
+    // parezca un cálculo automático cuando no lo es).
+    correcciones_vigentes: {
+      ventas_brutas: ventasBrutasC.correccion,
+      gastos_deducibles: gastosTotalC.correccion,
+      utilidad_neta: utilidadNetaC.correccion,
+      base_imponible: baseImponibleC.correccion,
+    },
     informativo: {
       compras_registradas: Number(Number(compras.total).toFixed(2)),
       produccion_registrada: Number(Number(produccion.total).toFixed(2)),

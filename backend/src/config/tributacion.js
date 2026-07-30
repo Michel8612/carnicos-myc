@@ -44,7 +44,18 @@ export const AVISO_LEGAL =
 // el dueño, para no tener que escogerlo cada vez que entra a la pestaña.
 export const CLAVE_TIPO_EMPRESA = 'contabilidad.tipo_empresa';
 
-export const TIPOS_EMPRESA = ['microempresa', 'pequena_empresa', 'mediana_empresa'];
+export const TIPOS_EMPRESA = ['microempresa', 'pequena_empresa', 'mediana_empresa', 'otro'];
+
+// Bases que el motor de cálculo entiende (ver `calcularTributosConRegimen`
+// más abajo). El régimen "Otro" (definido a mano por el usuario) solo
+// puede usar estas: así el motor genérico sigue sin cambios.
+export const BASES_VALIDAS = ['utilidad_neta', 'ventas_brutas', 'nomina'];
+
+// Clave en `parametros` donde se guarda la definición completa del
+// régimen "Otro": un JSON con la lista de tributos que el usuario armó
+// a mano (puede incluir los 4 de siempre con su porcentaje propio, más
+// los tributos que quiera añadir).
+export const CLAVE_REGIMEN_OTRO = 'trib.otro.definicion';
 
 // ------------------------------------------------------------
 //  Régimen tributario por defecto (mismos tributos en los tres
@@ -113,6 +124,46 @@ export const REGIMENES = {
 };
 
 // ------------------------------------------------------------
+//  Régimen "Otro": el usuario define a mano sus propios tributos
+//  (nombre + base + porcentaje, y puede añadir los que quiera). Se
+//  guarda como JSON en `parametros` bajo CLAVE_REGIMEN_OTRO y esta
+//  función lo convierte en un régimen con la MISMA forma que los de
+//  arriba, para que `calcularTributosConRegimen` no tenga que saber
+//  nada especial de él. Si todavía no se ha configurado nada, el
+//  régimen sale con una lista de tributos vacía (0 a tributar), nunca
+//  con datos inventados.
+// ------------------------------------------------------------
+export function regimenOtroDesdeParametros(mapaParametros = {}) {
+  const crudo = mapaParametros[CLAVE_REGIMEN_OTRO];
+  let tributos = [];
+  if (crudo) {
+    try {
+      const datos = JSON.parse(crudo);
+      if (Array.isArray(datos?.tributos)) {
+        tributos = datos.tributos
+          .filter((t) => t && t.clave && BASES_VALIDAS.includes(t.base))
+          .map((t) => ({
+            clave: String(t.clave),
+            nombre: String(t.nombre || t.clave),
+            base: t.base,
+            porcentaje: Number.isFinite(Number(t.porcentaje)) ? Number(t.porcentaje) : 0,
+            minimo_exento: Number.isFinite(Number(t.minimo_exento)) ? Number(t.minimo_exento) : 0,
+            notas: t.notas || '',
+          }));
+      }
+    } catch {
+      // JSON corrupto (no debería pasar, se valida al guardar): régimen
+      // vacío en vez de tumbar la pantalla de tributación.
+    }
+  }
+  return {
+    nombre: 'Otro (definido a mano)',
+    notas: 'Régimen configurado manualmente por el usuario: porcentajes y tributos propios. No es un cálculo automático de la ONAT.',
+    tributos,
+  };
+}
+
+// ------------------------------------------------------------
 //  Combina los regímenes de arriba con lo que el dueño haya
 //  corregido a mano en la tabla `parametros`. `mapaParametros` es un
 //  objeto simple { clave: valor_texto } ya leído de esa tabla.
@@ -138,6 +189,9 @@ export function combinarConParametros(mapaParametros = {}) {
       }),
     };
   }
+  // El régimen "Otro" no se combina con overrides de porcentaje (él ES
+  // la definición completa que el usuario guardó); se añade tal cual.
+  resultado.otro = regimenOtroDesdeParametros(mapaParametros);
   return resultado;
 }
 

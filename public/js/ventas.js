@@ -271,7 +271,7 @@ function renderCatalogo() {
       <div class="cat-exist">Existencia: ${p.cantidad} ${p.unidad}</div>
     </div>`).join('');
   catalogoGrid.querySelectorAll('.cat-tarjeta').forEach((el) => {
-    el.addEventListener('click', () => agregarAlCarrito(Number(el.dataset.id)));
+    el.addEventListener('click', () => abrirModalCantidad(Number(el.dataset.id)));
   });
 }
 
@@ -310,17 +310,21 @@ function avisarCarrito(msg) {
   avisoTimeout = setTimeout(() => carritoAviso.classList.remove('mostrar'), 3000);
 }
 
-function agregarAlCarrito(id) {
+// Agrega `cantidad` unidades del producto al carrito (sumando a lo que ya
+// hubiera). Nunca deja pasar de la existencia disponible: si no cabe, avisa
+// y no agrega nada. La usan tanto el catálogo (ventana de cantidad) como
+// cualquier otro punto que necesite meter varias unidades de una vez.
+function agregarCantidadAlCarrito(id, cantidad) {
   const prod = productosActuales.find((p) => p.id === id);
-  if (!prod) return;
+  if (!prod) return false;
   const linea = carrito.find((l) => l.producto_id === id);
   const enCarritoYa = linea ? linea.cantidad : 0;
-  if (enCarritoYa + 1 > Number(prod.cantidad)) {
+  if (enCarritoYa + cantidad > Number(prod.cantidad)) {
     avisarCarrito(`No hay más existencia de "${prod.nombre}" (disponible: ${prod.cantidad}).`);
-    return;
+    return false;
   }
   if (linea) {
-    linea.cantidad += 1;
+    linea.cantidad += cantidad;
   } else {
     carrito.push({
       producto_id: id,
@@ -328,10 +332,11 @@ function agregarAlCarrito(id) {
       unidad: prod.unidad,
       precio_venta: Number(prod.precio_venta) || 0,
       existencia: Number(prod.cantidad) || 0,
-      cantidad: 1,
+      cantidad,
     });
   }
   renderCarrito();
+  return true;
 }
 
 function cambiarCantidadCarrito(id, delta) {
@@ -391,6 +396,136 @@ document.getElementById('btnCarritoCancelar').addEventListener('click', () => {
   if (!confirm('¿Vaciar el carrito? Se perderán los productos agregados (no afecta la existencia).')) return;
   carrito = [];
   renderCarrito();
+});
+
+// ---- Popup: elegir cantidad al tocar una tarjeta del catálogo ----
+// Ya no se agrega 1 de inmediato al tocar: se abre esta ventana, el
+// vendedor elige cantidad (respetando la existencia menos lo que ya
+// hubiera en el carrito) y solo entra al carrito al pulsar "Confirmar".
+const modalCantidad = document.getElementById('modalCantidad');
+const mcError = document.getElementById('mcError');
+const mcCantidad = document.getElementById('mcCantidad');
+const mcConfirmar = document.getElementById('mcConfirmar');
+const mcMenos = document.getElementById('mcMenos');
+const mcMas = document.getElementById('mcMas');
+
+let mcProductoId = null;    // producto que está eligiendo cantidad ahora mismo
+let mcPermiteDecimales = false; // según la unidad (lb/kg/g/L admiten, u/caja no)
+
+// Redondea a 2 decimales para evitar arrastrar errores de punto flotante
+// al sumar/restar con los botones − / +.
+const redondear2 = (n) => Math.round(n * 100) / 100;
+
+function mcTope() {
+  const prod = productosActuales.find((p) => p.id === mcProductoId);
+  if (!prod) return 0;
+  const linea = carrito.find((l) => l.producto_id === mcProductoId);
+  const enCarritoYa = linea ? linea.cantidad : 0;
+  return redondear2(Number(prod.cantidad) - enCarritoYa);
+}
+
+function abrirModalCantidad(id) {
+  const prod = productosActuales.find((p) => p.id === id);
+  if (!prod) return;
+
+  mcProductoId = id;
+  mcPermiteDecimales = !['u', 'caja'].includes(prod.unidad);
+  mcError.style.display = 'none';
+
+  document.getElementById('mcImgBox').innerHTML = prod.imagen
+    ? `<img src="${prod.imagen}" alt="${prod.nombre}">`
+    : `<span class="cat-inicial">${inicialDe(prod.nombre)}</span>`;
+  document.getElementById('mcNombre').textContent = prod.nombre;
+  document.getElementById('mcPrecio').textContent = `${money(prod.precio_venta)} / ${prod.unidad}`;
+  document.getElementById('mcPrecioUsd').innerHTML = lineaUsd(prod.precio_venta);
+
+  const linea = carrito.find((l) => l.producto_id === id);
+  const enCarritoYa = linea ? linea.cantidad : 0;
+  const tope = mcTope();
+  document.getElementById('mcExistencia').textContent = enCarritoYa > 0
+    ? `Existencia: ${prod.cantidad} ${prod.unidad} (ya tiene ${enCarritoYa} ${prod.unidad} en el carrito)`
+    : `Existencia: ${prod.cantidad} ${prod.unidad}`;
+
+  mcCantidad.step = mcPermiteDecimales ? '0.01' : '1';
+  mcCantidad.value = tope > 0 ? (mcPermiteDecimales ? Math.min(1, tope) : 1) : 0;
+  mcConfirmar.disabled = tope <= 0;
+  if (tope <= 0) {
+    mcError.style.display = 'block';
+    mcError.textContent = `Ya tiene toda la existencia de "${prod.nombre}" en el carrito: no se puede agregar más.`;
+  }
+
+  actualizarSubtotalModal();
+  modalCantidad.classList.add('abierto');
+}
+
+function cerrarModalCantidad() {
+  modalCantidad.classList.remove('abierto');
+  mcProductoId = null;
+}
+
+function actualizarSubtotalModal() {
+  const prod = productosActuales.find((p) => p.id === mcProductoId);
+  if (!prod) return;
+  const cantidad = Number(mcCantidad.value) || 0;
+  const subtotal = cantidad * (Number(prod.precio_venta) || 0);
+  document.getElementById('mcSubtotal').textContent = money(subtotal);
+  document.getElementById('mcSubtotalUsd').innerHTML = lineaUsd(subtotal);
+}
+
+mcCantidad.addEventListener('input', actualizarSubtotalModal);
+
+mcMenos.addEventListener('click', () => {
+  const paso = mcPermiteDecimales ? 0.5 : 1;
+  const piso = mcPermiteDecimales ? 0.01 : 1;
+  const nueva = redondear2((Number(mcCantidad.value) || 0) - paso);
+  mcCantidad.value = Math.max(piso, nueva);
+  actualizarSubtotalModal();
+});
+mcMas.addEventListener('click', () => {
+  const paso = mcPermiteDecimales ? 0.5 : 1;
+  const tope = mcTope();
+  const nueva = redondear2((Number(mcCantidad.value) || 0) + paso);
+  mcCantidad.value = tope > 0 ? Math.min(tope, nueva) : 0;
+  actualizarSubtotalModal();
+});
+
+document.getElementById('mcCancelar').addEventListener('click', cerrarModalCantidad);
+modalCantidad.addEventListener('click', (e) => { if (e.target === modalCantidad) cerrarModalCantidad(); });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && modalCantidad.classList.contains('abierto')) cerrarModalCantidad();
+});
+
+mcConfirmar.addEventListener('click', () => {
+  mcError.style.display = 'none';
+  const prod = productosActuales.find((p) => p.id === mcProductoId);
+  if (!prod) return;
+
+  const raw = mcCantidad.value;
+  const cantidad = Number(raw);
+  const tope = mcTope();
+
+  if (raw === '' || Number.isNaN(cantidad) || cantidad <= 0) {
+    mcError.style.display = 'block';
+    mcError.textContent = 'Escriba una cantidad válida, mayor que cero.';
+    return;
+  }
+  if (!mcPermiteDecimales && !Number.isInteger(cantidad)) {
+    mcError.style.display = 'block';
+    mcError.textContent = `"${prod.nombre}" se vende por ${prod.unidad}: no admite decimales.`;
+    return;
+  }
+  if (tope <= 0) {
+    mcError.style.display = 'block';
+    mcError.textContent = `Ya tiene toda la existencia de "${prod.nombre}" en el carrito: no se puede agregar más.`;
+    return;
+  }
+  if (cantidad > tope) {
+    mcError.style.display = 'block';
+    mcError.textContent = `Máximo disponible para agregar: ${tope} ${prod.unidad}.`;
+    return;
+  }
+
+  if (agregarCantidadAlCarrito(mcProductoId, cantidad)) cerrarModalCantidad();
 });
 
 // ---- Popup: confirmar pago del carrito ----

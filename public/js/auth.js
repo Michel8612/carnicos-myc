@@ -37,3 +37,33 @@ loginForm.addEventListener('submit', async (e) => {
     boton.textContent = textoOriginal;
   }
 });
+
+// ============================================================
+//  Cerrar sesión — avisando al servidor
+//
+//  Antes, "Salir" solo borraba el token en el navegador: la sesión
+//  seguía viva en la base y el cierre no quedaba auditado. Ahora se
+//  avisa primero al backend (POST /auth/logout, ver auth.js del
+//  servidor) para que marque la sesión como cerrada y quede registro
+//  en auditoría.
+//
+//  Si ese aviso falla — sin conexión, token ya vencido, lo que sea:
+//  cosas normales trabajando desde Cuba — el navegador se limpia y
+//  redirige lo mismo. A nadie se le puede quedar la sesión "pegada"
+//  por un fallo de red: eso sería peor que no auditar el cierre.
+//
+//  API.logout se agrega aquí (sin tocar js/api.js, que es de otro
+//  agente) igual que legal.js hace con API.login.
+// ============================================================
+API.logout = () => apiFetch('/auth/logout', { method: 'POST' });
+
+async function logout() {
+  try {
+    await API.logout();
+  } catch (err) {
+    console.error('No se pudo avisar el cierre de sesión al servidor:', err.message);
+  }
+  clearToken();
+  location.href = 'index.html';
+}
+window.logout = logout;

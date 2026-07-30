@@ -259,6 +259,118 @@ async function cargarHistorialTransferencias() {
 }
 
 // ============================================================
+//  Historial de movimientos del almacén (entradas, salidas, ajustes,
+//  traslados, producción). El borrado (✕) es SOLO administrativo:
+//  no toca existencias, solo quita la línea del historial. El backend
+//  ya rechaza el borrado a cualquiera que no sea dueño/admin/proveedor
+//  aunque se le llame a mano — aquí en el frontend solo se OCULTA el
+//  botón para los demás roles, por comodidad, no por seguridad.
+//
+//  El endpoint de listado (GET /inventario/movimientos) todavía no
+//  está en api.js (lo edita otro agente), así que se llama aquí mismo
+//  con apiFetch(), la misma función global que usa api.js para mandar
+//  el token de sesión en cada petición (mismo patrón que ventas.js).
+// ============================================================
+const historialMovimientos = (filtros) => {
+  const q = new URLSearchParams();
+  if (filtros && filtros.almacen_id) q.set('almacen_id', filtros.almacen_id);
+  if (filtros && filtros.desde) q.set('desde', filtros.desde);
+  if (filtros && filtros.hasta) q.set('hasta', filtros.hasta);
+  const s = q.toString();
+  return apiFetch('/inventario/movimientos' + (s ? '?' + s : ''));
+};
+
+const TIPO_MOV_LABEL = {
+  entrada: 'Entrada', salida: 'Salida', traslado: 'Traslado',
+  ajuste: 'Ajuste', produccion: 'Producción',
+};
+
+function fechaHoraCorta(f) {
+  if (!f) return '';
+  const d = new Date(f);
+  return d.toLocaleDateString('es-CU', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ' ' +
+    d.toLocaleTimeString('es-CU', { hour: '2-digit', minute: '2-digit' });
+}
+
+// Llena el selector de almacén del filtro. Un almacenero limitado solo
+// tiene el suyo (API.almacenes() ya se lo devuelve así); dueño/admin/
+// proveedor/almacen_central ven todos.
+async function cargarFiltroAlmacenMovimientos() {
+  const sel = document.getElementById('hmFiltroAlmacen');
+  if (!sel) return;
+  let almacenes = [];
+  try { almacenes = await API.almacenes(); } catch (e) { almacenes = []; }
+  const actual = sel.value;
+  sel.innerHTML = '<option value="">Todos los almacenes</option>' +
+    almacenes.map((a) => `<option value="${a.id}">${a.nombre}</option>`).join('');
+  if (actual) sel.value = actual;
+}
+
+async function cargarHistorialMovimientos() {
+  const cuerpo = document.getElementById('historialMovimientosList');
+  if (!cuerpo) return;
+
+  const filtros = {
+    almacen_id: document.getElementById('hmFiltroAlmacen')?.value || '',
+    desde: document.getElementById('hmFiltroDesde')?.value || '',
+    hasta: document.getElementById('hmFiltroHasta')?.value || '',
+  };
+
+  let filas = [];
+  try { filas = await historialMovimientos(filtros); } catch (e) { filas = []; }
+
+  const esAdmin = esDueno(); // dueño/admin/proveedor — igual que ES_ADMIN_TOTAL en el backend
+
+  if (!filas.length) {
+    cuerpo.innerHTML = '<tr><td colspan="8" style="color:#888;">Sin movimientos registrados.</td></tr>';
+    return;
+  }
+
+  cuerpo.innerHTML = filas.map((m) => `
+    <tr>
+      <td>${fechaHoraCorta(m.fecha)}</td>
+      <td>${m.producto || ''}</td>
+      <td>${m.almacen || ''}</td>
+      <td>${TIPO_MOV_LABEL[m.tipo] || m.tipo}</td>
+      <td>${Number(m.cantidad).toLocaleString('es-CU', { maximumFractionDigits: 3 })} ${m.unidad || ''}</td>
+      <td>${m.usuario_nombre || ''}</td>
+      <td>${m.nota || ''}</td>
+      <td>${esAdmin ? `<button type="button" class="btn-x" data-id="${m.id}" title="Borrar línea del historial">✕</button>` : ''}</td>
+    </tr>`).join('');
+
+  if (esAdmin) {
+    cuerpo.querySelectorAll('.btn-x').forEach((b) => {
+      b.addEventListener('click', () => borrarMovimientoHistorial(Number(b.dataset.id)));
+    });
+  }
+}
+
+async function borrarMovimientoHistorial(id) {
+  const aviso = 'Esto borra SOLO la línea del historial: NO devuelve ni quita mercancía ' +
+    'del inventario (la existencia actual no cambia). Úselo únicamente para corregir un ' +
+    'registro erróneo, no para "deshacer" un movimiento real.\n\n' +
+    '¿Continuar?';
+  if (!confirm(aviso)) return;
+
+  const motivo = prompt('Motivo del borrado (obligatorio):', '');
+  if (motivo === null) return; // canceló
+  if (!motivo.trim()) {
+    alert('Debe indicar un motivo para borrar la línea.');
+    return;
+  }
+
+  try {
+    await API.borrarMovimientoAlmacen(id, motivo.trim());
+    await cargarHistorialMovimientos();
+  } catch (e) {
+    alert('No se pudo borrar: ' + e.message);
+  }
+}
+
+const btnHmFiltrar = document.getElementById('hmBtnFiltrar');
+if (btnHmFiltrar) btnHmFiltrar.addEventListener('click', cargarHistorialMovimientos);
+
+// ============================================================
 //  Lo que la cocina produjo, esperando entrada al almacén
 //
 //  El cocinero elabora y eso NO entra solo al almacén: aparece
@@ -395,8 +507,10 @@ function cargarTodo() {
   cargarProducido();   // lo que la cocina dejó listo para entrar
   cargarBandejaRecepcion();       // transferencias pendientes por recibir
   cargarHistorialTransferencias(); // historial de lo enviado
+  cargarHistorialMovimientos();   // historial de entradas/salidas/ajustes
 }
 
 // Carga inicial
 cargarUnidades();
+cargarFiltroAlmacenMovimientos();
 cargarTodo();

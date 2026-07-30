@@ -11,47 +11,168 @@
 import { Router } from 'express';
 import db from '../db/index.js';
 import { requiereSesion } from '../middleware/auth.js';
+import { auditar } from '../auditoria.js';
 
 const router = Router();
 router.use(requiereSesion);
 
-// Las 4 primeras son las de siempre (no se tocan, hay datos viejos con
-// esas categorías). Las de abajo se añaden para que el gasto real del
-// negocio quepa en el sistema: sin ellas no había dónde meter ni la
-// electricidad ni el alquiler, y el motor tributario nunca encontraba
-// nómina (así que la Contribución a la Seguridad Social siempre daba 0).
-// 'nomina' en particular es la que lee backend/src/routes/contabilidad.js
-// (ruta /tributacion) para calcular esa contribución: por eso su clave
-// debe seguir siendo exactamente esta cadena.
-const CATEGORIAS = [
-  'directo', 'indirecto', 'fijo', 'combustible',
-  'nomina', 'electricidad', 'alquiler', 'materia_prima',
-  'transporte', 'servicios', 'mantenimiento', 'impuestos', 'otros',
+// Quién puede ESCRIBIR en costos (crear/borrar gastos, categorías...).
+// OJO: server.js monta /api/costos con `escrituraSoloRoles()` (sin
+// roles extra), que deja pasar solo a dueño/admin/proveedor y bloquea
+// a 'contabilidad' ANTES de que la petición llegue aquí. Este chequeo
+// de dentro es un candado adicional (por si algún día se llama este
+// router desde otro punto de montaje), pero mientras esa línea de
+// server.js no incluya 'contabilidad', el rol contabilidad seguirá
+// recibiendo 403 en DELETE /gastos/:id y en POST/DELETE /categorias
+// aunque el código de aquí ya lo permita. Lo dejo dicho en el informe.
+const PUEDE_ESCRIBIR_CONTABLE = (rol) => ['dueno', 'admin', 'proveedor', 'contabilidad'].includes(rol);
+
+// ------------------------------------------------------------
+//  Categorías de gasto (configurables)
+//
+//  Antes vivían fijas en un array de este archivo. Ahora viven en la
+//  tabla `categorias_gasto`: el dueño (o contabilidad) puede crear las
+//  suyas. Las 13 de siempre se siembran solas la primera vez que hace
+//  falta (idempotente, con ON CONFLICT DO NOTHING) y quedan marcadas
+//  fija=1 para que no se puedan borrar.
+//
+//  CRÍTICO: 'nomina' alimenta el cálculo de la Contribución a la
+//  Seguridad Social en backend/src/routes/contabilidad.js (ruta
+//  /tributacion). Si se pudiera borrar o desactivar, ese tributo
+//  volvería a dar siempre 0 sin que nadie lo notara. Por eso lleva un
+//  candado extra explícito en DELETE /categorias/:clave, además del
+//  candado general de fija=1.
+// ------------------------------------------------------------
+const CATEGORIAS_FABRICA = [
+  ['directo', 'Costo directo'],
+  ['indirecto', 'Costo indirecto'],
+  ['fijo', 'Gasto fijo'],
+  ['combustible', 'Combustible'],
+  ['nomina', 'Nómina (salarios)'],
+  ['electricidad', 'Electricidad'],
+  ['alquiler', 'Alquiler'],
+  ['materia_prima', 'Materia prima'],
+  ['transporte', 'Transporte'],
+  ['servicios', 'Servicios'],
+  ['mantenimiento', 'Mantenimiento'],
+  ['impuestos', 'Impuestos'],
+  ['otros', 'Otros'],
 ];
 
-// Etiquetas legibles para pintar el <select> de la pantalla de Gastos
-// sin tener que duplicar esta lista en el HTML.
-const ETIQUETAS_CATEGORIA = {
-  directo: 'Costo directo',
-  indirecto: 'Costo indirecto',
-  fijo: 'Gasto fijo',
-  combustible: 'Combustible',
-  nomina: 'Nómina (salarios)',
-  electricidad: 'Electricidad',
-  alquiler: 'Alquiler',
-  materia_prima: 'Materia prima',
-  transporte: 'Transporte',
-  servicios: 'Servicios',
-  mantenimiento: 'Mantenimiento',
-  impuestos: 'Impuestos',
-  otros: 'Otros',
-};
+let categoriasSembradas = false;
+async function asegurarCategoriasSembradas() {
+  if (categoriasSembradas) return;
+  const fila = await db.prepare('SELECT COUNT(*)::int AS total FROM categorias_gasto').get();
+  if (Number(fila?.total) === 0) {
+    for (const [clave, etiqueta] of CATEGORIAS_FABRICA) {
+      // OJO: categorias_gasto no tiene columna "id" (su PK es "clave").
+      // El adaptador de db/index.js añade "RETURNING id" automáticamente
+      // a cualquier INSERT sin RETURNING; aquí hay que ponerle uno
+      // explícito (RETURNING clave) para que no intente devolver una
+      // columna que no existe.
+      await db.prepare(`
+        INSERT INTO categorias_gasto (clave, etiqueta, deducible, fija, activa)
+        VALUES (?, ?, 1, 1, 1)
+        ON CONFLICT (clave) DO NOTHING
+        RETURNING clave
+      `).run(clave, etiqueta);
+    }
+  }
+  categoriasSembradas = true;
+}
 
-// Categorías disponibles para el <select> del formulario de gastos.
-// Un solo lugar de verdad: si se añade una categoría arriba, aparece
-// aquí solo, sin tocar el HTML.
+// Clave sencilla: minúsculas, sin espacios ni acentos, empieza por letra.
+const CLAVE_CATEGORIA_VALIDA = /^[a-z][a-z0-9_]*$/;
+
+// Categorías para el <select> del formulario de gastos. Con ?todas=1
+// devuelve también las inactivas (para la pantalla de administración).
 router.get('/categorias', async (req, res) => {
-  res.json(CATEGORIAS.map((clave) => ({ clave, etiqueta: ETIQUETAS_CATEGORIA[clave] || clave })));
+  await asegurarCategoriasSembradas();
+  const todas = req.query.todas === '1';
+  const filas = await db.prepare(
+    todas
+      ? 'SELECT * FROM categorias_gasto ORDER BY fija DESC, activa DESC, etiqueta'
+      : 'SELECT * FROM categorias_gasto WHERE activa = 1 ORDER BY fija DESC, etiqueta'
+  ).all();
+  res.json(filas);
+});
+
+// Crear una categoría propia.
+router.post('/categorias', async (req, res) => {
+  if (!PUEDE_ESCRIBIR_CONTABLE(req.usuario.rol)) {
+    return res.status(403).json({ error: 'No tiene permiso para crear categorías de gasto.' });
+  }
+  await asegurarCategoriasSembradas();
+  const { clave, etiqueta, deducible } = req.body || {};
+  const claveLimpia = String(clave || '').trim().toLowerCase();
+  if (!CLAVE_CATEGORIA_VALIDA.test(claveLimpia)) {
+    return res.status(400).json({
+      error: 'La clave debe ser sencilla: minúsculas, sin espacios ni acentos, letras/números/guion bajo, empezando por letra.',
+    });
+  }
+  if (!etiqueta || !String(etiqueta).trim()) {
+    return res.status(400).json({ error: 'Indique una etiqueta (nombre visible) para la categoría.' });
+  }
+  const existe = await db.prepare('SELECT 1 FROM categorias_gasto WHERE clave = ?').get(claveLimpia);
+  if (existe) return res.status(400).json({ error: 'Ya existe una categoría con esa clave.' });
+
+  // Igual que en la siembra: RETURNING explícito porque esta tabla no
+  // tiene columna "id" (ver comentario en asegurarCategoriasSembradas).
+  await db.prepare(`
+    INSERT INTO categorias_gasto (clave, etiqueta, deducible, fija, activa)
+    VALUES (?, ?, ?, 0, 1)
+    RETURNING clave
+  `).run(claveLimpia, String(etiqueta).trim(), deducible === false ? 0 : 1);
+
+  await auditar({
+    modulo: 'gastos', accion: 'crear', req, entidad: 'categorias_gasto', entidad_id: claveLimpia,
+    descripcion: `Categoría de gasto creada: ${etiqueta} (${claveLimpia})`,
+  });
+  res.json({ ok: true, clave: claveLimpia });
+});
+
+// Borrar (o, si está en uso, desactivar) una categoría propia.
+router.delete('/categorias/:clave', async (req, res) => {
+  if (!PUEDE_ESCRIBIR_CONTABLE(req.usuario.rol)) {
+    return res.status(403).json({ error: 'No tiene permiso para borrar categorías de gasto.' });
+  }
+  const clave = req.params.clave;
+  const cat = await db.prepare('SELECT * FROM categorias_gasto WHERE clave = ?').get(clave);
+  if (!cat) return res.status(404).json({ error: 'No existe esa categoría.' });
+
+  // Candado explícito (aparte de fija=1): 'nomina' nunca se toca.
+  if (clave === 'nomina') {
+    return res.status(400).json({
+      error: 'La categoría "nomina" no se puede borrar ni desactivar: de ella depende el cálculo de la Seguridad Social.',
+    });
+  }
+  if (cat.fija) {
+    return res.status(400).json({ error: 'Esta es una categoría de fábrica y no se puede borrar.' });
+  }
+
+  const uso = await db.prepare('SELECT COUNT(*)::int AS total FROM gastos WHERE categoria = ?').get(clave);
+  if (Number(uso?.total) > 0) {
+    // No se borra (dejaría huérfanos los gastos ya registrados con esa
+    // categoría): se desactiva para que no siga apareciendo en el
+    // formulario, pero el historial ya registrado la sigue mostrando tal cual.
+    await db.prepare('UPDATE categorias_gasto SET activa = 0 WHERE clave = ?').run(clave);
+    await auditar({
+      modulo: 'gastos', accion: 'modificar', req, entidad: 'categorias_gasto', entidad_id: clave,
+      descripcion: `Categoría "${clave}" desactivada (tenía ${uso.total} gasto(s) registrados; borrarla habría dejado huérfanos).`,
+    });
+    return res.json({
+      ok: true, desactivada: true,
+      mensaje: `Hay ${uso.total} gasto(s) con esta categoría: se desactivó en vez de borrarla.`,
+    });
+  }
+
+  await db.prepare('DELETE FROM categorias_gasto WHERE clave = ?').run(clave);
+  await auditar({
+    modulo: 'gastos', accion: 'eliminar', req, entidad: 'categorias_gasto', entidad_id: clave,
+    descripcion: `Categoría de gasto eliminada: ${cat.etiqueta} (${clave})`,
+    antes: cat,
+  });
+  res.json({ ok: true, desactivada: false });
 });
 
 // ------------------------------------------------------------
@@ -62,7 +183,11 @@ router.post('/gastos', async (req, res) => {
   if (!categoria || !concepto || !monto) {
     return res.status(400).json({ error: 'Indique categoría, concepto y monto.' });
   }
-  if (!CATEGORIAS.includes(categoria)) {
+  await asegurarCategoriasSembradas();
+  const catValida = await db.prepare(
+    'SELECT 1 FROM categorias_gasto WHERE clave = ? AND activa = 1'
+  ).get(categoria);
+  if (!catValida) {
     return res.status(400).json({ error: 'Categoría no válida.' });
   }
   const mon = ['CUP', 'USD', 'MLC'].includes(moneda) ? moneda : 'CUP';
@@ -103,6 +228,45 @@ router.get('/gastos', async (req, res) => {
   `).all(mes);
 
   res.json({ filas, por_moneda: porMoneda });
+});
+
+// Borra un gasto suelto Y su egreso de caja asociado, en una
+// transacción (mismo patrón que DELETE /nomina/:id). Si el gasto vino
+// de un pago de nómina, se rechaza: hay que borrarlo desde la pestaña
+// Nómina para que se elimine todo junto (nómina, gasto y caja) sin
+// dejar la fila de "nomina" huérfana.
+router.delete('/gastos/:id', async (req, res) => {
+  if (!PUEDE_ESCRIBIR_CONTABLE(req.usuario.rol)) {
+    return res.status(403).json({ error: 'No tiene permiso para borrar gastos.' });
+  }
+  const id = Number(req.params.id);
+  const { motivo } = req.body || {};
+  if (!motivo || !String(motivo).trim()) {
+    return res.status(400).json({ error: 'Debe indicar el motivo del borrado.' });
+  }
+  const gasto = await db.prepare('SELECT * FROM gastos WHERE id = ?').get(id);
+  if (!gasto) return res.status(404).json({ error: 'No existe ese gasto.' });
+  if (gasto.origen_tipo === 'nomina') {
+    return res.status(409).json({
+      error: 'Este gasto proviene de un pago de nómina: bórrelo desde la pestaña Nómina, así se elimina todo junto (nómina, gasto y caja) sin dejar huérfanos.',
+    });
+  }
+
+  await db.transaction(async () => {
+    // El egreso de caja se creó con origen_tipo='gasto' y origen_id
+    // apuntando a este gasto (ver POST /gastos, /combustible y
+    // /fijos/aplicar más abajo): se borra primero para no descuadrar
+    // la caja, y solo después el gasto.
+    await db.prepare("DELETE FROM caja WHERE origen_tipo = 'gasto' AND origen_id = ?").run(id);
+    await db.prepare('DELETE FROM gastos WHERE id = ?').run(id);
+  })();
+
+  await auditar({
+    modulo: 'gastos', accion: 'eliminar', req, entidad: 'gastos', entidad_id: id,
+    descripcion: `Gasto eliminado: ${gasto.concepto} (${gasto.monto} ${gasto.moneda})`,
+    antes: gasto, motivo: String(motivo).trim(),
+  });
+  res.json({ ok: true });
 });
 
 // ------------------------------------------------------------
@@ -261,14 +425,16 @@ router.post('/fijos/aplicar', async (req, res) => {
   const tx = db.transaction(async () => {
     for (const f of fijos) {
       if (f.ultimo_aplicado === mesActual) continue; // ya aplicado este mes
-      await db.prepare(`
+      const gasto = await db.prepare(`
         INSERT INTO gastos (categoria, concepto, monto, moneda, origen_tipo, origen_id, nota)
         VALUES ('fijo', ?, ?, ?, 'fijo_auto', ?, 'Gasto fijo mensual')
       `).run(f.concepto, f.monto, f.moneda, f.id);
+      // origen_id enlaza el egreso a ESTE gasto (antes no se guardaba y
+      // DELETE /gastos/:id no tenía forma fiable de encontrar su caja).
       await db.prepare(`
-        INSERT INTO caja (tipo, concepto, monto, moneda, origen_tipo)
-        VALUES ('egreso', ?, ?, ?, 'gasto')
-      `).run(f.concepto, f.monto, f.moneda);
+        INSERT INTO caja (tipo, concepto, monto, moneda, origen_tipo, origen_id)
+        VALUES ('egreso', ?, ?, ?, 'gasto', ?)
+      `).run(f.concepto, f.monto, f.moneda, gasto.lastInsertRowid);
       await db.prepare('UPDATE gastos_fijos SET ultimo_aplicado = ? WHERE id = ?').run(mesActual, f.id);
       aplicados++;
     }
@@ -291,14 +457,16 @@ router.post('/combustible', async (req, res) => {
       VALUES (?, ?, ?, ?, ?)
     `).run(Number(litros), Number(costo), mon, nota || null, req.usuario.id);
     // El combustible es un gasto: registrarlo como tal y en caja.
-    await db.prepare(`
+    const gasto = await db.prepare(`
       INSERT INTO gastos (categoria, concepto, monto, moneda, origen_tipo, origen_id, usuario_id)
       VALUES ('combustible', ?, ?, ?, 'combustible', ?, ?)
     `).run(`Combustible (${litros} L)`, Number(costo), mon, r.lastInsertRowid, req.usuario.id);
+    // origen_id enlaza el egreso a ESTE gasto (antes no se guardaba y
+    // DELETE /gastos/:id no tenía forma fiable de encontrar su caja).
     await db.prepare(`
-      INSERT INTO caja (tipo, concepto, monto, moneda, origen_tipo, usuario_id)
-      VALUES ('egreso', ?, ?, ?, 'gasto', ?)
-    `).run(`Combustible (${litros} L)`, Number(costo), mon, req.usuario.id);
+      INSERT INTO caja (tipo, concepto, monto, moneda, origen_tipo, origen_id, usuario_id)
+      VALUES ('egreso', ?, ?, ?, 'gasto', ?, ?)
+    `).run(`Combustible (${litros} L)`, Number(costo), mon, gasto.lastInsertRowid, req.usuario.id);
   });
   await tx();
   res.json({ ok: true });

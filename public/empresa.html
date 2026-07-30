@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Empresa - Cárnicos M&C</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    body.empresa-body { margin:0; font-family:Arial, Helvetica, sans-serif; background:linear-gradient(to bottom,#f5f5f5,#e0f7fa); color:#000; }
+    header { text-align:center; padding:18px 20px 20px; background:#37474f; color:#fff; box-shadow:0 2px 6px rgba(0,0,0,.25); }
+    .logo-empresa { width:76px; height:76px; object-fit:contain; display:block; margin:0 auto 8px; background:#fff; border-radius:50%; padding:6px; box-shadow:0 2px 8px rgba(0,0,0,.3); }
+    header h1 { color:#fff; font-size:24px; letter-spacing:.5px; text-shadow:0 1px 3px rgba(0,0,0,.4); margin:8px 0; }
+
+    .emp-wrap { max-width:1150px; margin:0 auto; padding:0 12px 40px; }
+    .tabs { display:flex; gap:8px; justify-content:center; flex-wrap:wrap; margin:16px 0; }
+    .tabs button { background:#fff; border:1px solid #cfd8dc; color:#37474f; padding:10px 16px; border-radius:20px; cursor:pointer; font-size:14px; }
+    .tabs button.activo { background:#1976D2; color:#fff; border-color:#1976D2; font-weight:bold; }
+    .panel { display:none; } .panel.activo { display:block; }
+
+    h3.seccion { margin:22px 0 6px; color:#283593; font-size:17px; }
+    p.sub { margin:0 0 10px; font-size:12.5px; color:#777; }
+
+    .tarjeta { background:#fff; border-radius:12px; padding:16px; box-shadow:0 3px 10px rgba(0,0,0,.12); margin-bottom:16px; }
+    .grid-form { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; }
+    .grid-form label { display:block; font-size:12.5px; color:#555; margin-bottom:4px; font-weight:bold; }
+    .grid-form input, .grid-form select, .grid-form textarea {
+      width:100%; padding:10px; border:1px solid #ccc; border-radius:8px; font-size:14px; box-sizing:border-box; font-family:inherit;
+    }
+    .grid-form textarea { resize:vertical; min-height:60px; }
+    .campo-ancho { grid-column:1 / -1; }
+    .fila-check { display:flex; gap:14px; flex-wrap:wrap; }
+    .fila-check label { display:flex; align-items:center; gap:6px; font-size:13.5px; font-weight:normal; color:#333; }
+    .fila-check input { width:auto; }
+
+    .btn { padding:10px 18px; border:none; border-radius:8px; cursor:pointer; font-size:14px; font-weight:bold; }
+    .btn-azul { background:#1976D2; color:#fff; } .btn-azul:hover { background:#1565C0; }
+    .btn-verde { background:#2e7d32; color:#fff; } .btn-verde:hover { background:#1b5e20; }
+    .btn-x { background:#ef5350; color:#fff; border:none; border-radius:6px; padding:5px 10px; cursor:pointer; font-size:13px; }
+    .btn-x:hover { background:#c62828; }
+    .btn-gris { background:#607d8b; color:#fff; } .btn-gris:hover { background:#455a64; }
+    .acciones { margin-top:14px; display:flex; gap:10px; flex-wrap:wrap; }
+
+    .aviso { background:#fff8e1; border:1px solid #ffca28; color:#7a5c00; border-radius:8px; padding:10px 14px; font-size:12.5px; margin:14px 0; }
+    .aviso b { color:#5d4400; }
+    .aviso-bloqueo { background:#ffebee; border:1px solid #ef9a9a; color:#8d1a1a; }
+
+    .tabla-scroll { overflow-x:auto; margin-top:10px; }
+    table.datos { width:100%; border-collapse:collapse; background:#fff; border-radius:10px; overflow:hidden; box-shadow:0 3px 10px rgba(0,0,0,.1); min-width:700px; }
+    table.datos th { background:#c5cae9; padding:10px 8px; font-size:12.5px; text-align:center; }
+    table.datos td { border-top:1px solid #eceff1; padding:8px; font-size:13.5px; text-align:center; }
+    table.datos td.izq, table.datos th.izq { text-align:left; }
+    .vacio { text-align:center; color:#777; padding:24px; }
+    .etq { padding:3px 8px; border-radius:10px; font-size:11px; font-weight:bold; display:inline-block; margin:1px; }
+    .e-activa { background:#e8f5e9; color:#2e7d32; } .e-inactiva { background:#eceff1; color:#607d8b; }
+    .e-registrado { background:#e3f2fd; color:#1565C0; } .e-conciliado { background:#e8f5e9; color:#2e7d32; } .e-anulado { background:#ffebee; color:#c62828; }
+    .e-ingreso { background:#e8f5e9; color:#2e7d32; } .e-egreso { background:#ffebee; color:#c62828; }
+    .g-pos { color:#2e7d32; font-weight:bold; } .g-neg { color:#c62828; font-weight:bold; }
+
+    .filtros { display:flex; gap:10px; flex-wrap:wrap; align-items:end; background:#fff; padding:12px; border-radius:10px; box-shadow:0 3px 10px rgba(0,0,0,.08); margin-bottom:10px; }
+    .filtros label { display:block; font-size:12px; color:#555; margin-bottom:3px; }
+    .filtros select, .filtros input { padding:8px; border:1px solid #cfd8dc; border-radius:8px; font-size:14px; }
+    .filtros button { padding:9px 14px; border:none; border-radius:8px; cursor:pointer; font-size:14px; background:#1976D2; color:#fff; }
+
+    .qr-texto { background:#f5f5f5; border:1px dashed #b0bec5; border-radius:8px; padding:10px; font-size:12.5px; white-space:pre-wrap; font-family:monospace; }
+    .qr-imagen-prev { max-width:120px; max-height:120px; border-radius:8px; border:1px solid #ccc; display:block; margin-top:6px; }
+
+    .tarjetas-pasarela { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:14px; }
+    .p-card { background:#fff; border-radius:12px; padding:16px; box-shadow:0 3px 10px rgba(0,0,0,.12); border-top:5px solid #90a4ae; }
+    .p-card.disponible { border-top-color:#2e7d32; }
+    .p-card.no-disponible { border-top-color:#c62828; }
+    .p-card h4 { margin:0 0 8px; font-size:16px; }
+    .p-card .estado { font-weight:bold; margin-bottom:8px; }
+    .p-card .estado.si { color:#2e7d32; } .p-card .estado.no { color:#c62828; }
+    .p-card ul { margin:6px 0 0; padding-left:18px; font-size:12.5px; color:#555; }
+    .p-card p { font-size:12.5px; color:#555; }
+
+    @media (max-width:600px) { .grid-form { grid-template-columns:1fr; } }
+  </style>
+</head>
+
+<body class="empresa-body">
+  <header>
+    <img src="img/logo.png" alt="Cárnicos M&C" class="logo-empresa logo-circulo">
+    <h1>Empresa</h1>
+    <div class="top-nav">
+      <a href="#" id="navPanel" style="display:none;">← Panel</a>
+      <a href="#" onclick="logout();return false;">Salir</a>
+    </div>
+  </header>
+
+  <main class="emp-wrap">
+    <div class="tabs">
+      <button class="activo" data-panel="pFiscal">Datos fiscales</button>
+      <button data-panel="pCuentas">Cuentas bancarias</button>
+      <button data-panel="pMovimientos">Movimientos bancarios</button>
+      <button data-panel="pPasarelas">Pasarelas de pago</button>
+    </div>
+
+    <!-- DATOS FISCALES -->
+    <section class="panel activo" id="pFiscal">
+      <h3 class="seccion">Datos fiscales de la empresa</h3>
+      <p class="sub">Aparecen en las facturas y en los reportes que se presentan a la ONAT. Se puede cambiar cuando haga falta.</p>
+      <div id="fiscalSoloLectura" class="aviso" style="display:none;">
+        Solo el dueño puede modificar estos datos. Usted puede verlos, pero no guardarlos.
+      </div>
+      <div class="tarjeta">
+        <div class="grid-form">
+          <div><label>Nombre fiscal</label><input id="fNombreFiscal" type="text" placeholder="Ej. Cárnicos M&C"></div>
+          <div><label>Razón social</label><input id="fRazonSocial" type="text"></div>
+          <div><label>NIT</label><input id="fNit" type="text"></div>
+          <div>
+            <label>Régimen tributario</label>
+            <select id="fRegimen">
+              <option value="">Sin definir</option>
+              <option value="microempresa">Microempresa</option>
+              <option value="pequena_empresa">Pequeña empresa</option>
+              <option value="mediana_empresa">Mediana empresa</option>
+            </select>
+          </div>
+          <div class="campo-ancho"><label>Dirección</label><input id="fDireccion" type="text"></div>
+          <div><label>Provincia</label><input id="fProvincia" type="text"></div>
+          <div><label>Municipio</label><input id="fMunicipio" type="text"></div>
+          <div><label>Teléfono</label><input id="fTelefono" type="text"></div>
+          <div><label>Correo</label><input id="fCorreo" type="email" placeholder="negocio@correo.com"></div>
+          <div>
+            <label>Moneda principal</label>
+            <select id="fMonedaPrincipal">
+              <option value="CUP">CUP</option>
+              <option value="USD">USD</option>
+              <option value="MLC">MLC</option>
+            </select>
+          </div>
+          <div class="campo-ancho">
+            <label>Monedas secundarias</label>
+            <div class="fila-check">
+              <label><input type="checkbox" value="CUP" class="fMonedaSec"> CUP</label>
+              <label><input type="checkbox" value="USD" class="fMonedaSec"> USD</label>
+              <label><input type="checkbox" value="MLC" class="fMonedaSec"> MLC</label>
+            </div>
+          </div>
+          <div><label>Pie de factura</label><input id="fPieFactura" type="text" placeholder="Ej. Gracias por su compra"></div>
+          <div><label>Prefijo de serie</label><input id="fPrefijoSerie" type="text" placeholder="Ej. FAC-"></div>
+          <div class="campo-ancho"><label>Encabezado oficial de reportes</label><input id="fEncabezadoReportes" type="text" placeholder="Texto que aparece arriba en los reportes"></div>
+        </div>
+        <div class="acciones">
+          <button class="btn btn-azul" id="btnGuardarFiscal">Guardar cambios</button>
+          <span class="sub" id="fiscalActualizado"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- CUENTAS BANCARIAS -->
+    <section class="panel" id="pCuentas">
+      <h3 class="seccion">Alta / edición de cuenta bancaria</h3>
+      <p class="sub">El QR de cobro solo lleva datos públicos (banco, número o alias, moneda, titular). Nunca claves ni credenciales.</p>
+      <div class="tarjeta">
+        <input type="hidden" id="cId">
+        <div class="grid-form">
+          <div><label>Banco</label><input id="cBanco" type="text" placeholder="Ej. BANDEC, BPA, Metropolitano..."></div>
+          <div><label>Número de cuenta</label><input id="cNumero" type="text"></div>
+          <div><label>Alias / número de cobro (opcional)</label><input id="cAlias" type="text" placeholder="Como aparece para recibir pagos"></div>
+          <div><label>Titular</label><input id="cTitular" type="text"></div>
+          <div>
+            <label>Moneda</label>
+            <select id="cMoneda">
+              <option value="CUP">CUP</option>
+              <option value="USD">USD</option>
+              <option value="MLC">MLC</option>
+            </select>
+          </div>
+          <div>
+            <label>Estado</label>
+            <select id="cEstado">
+              <option value="activa">Activa</option>
+              <option value="inactiva">Inactiva</option>
+            </select>
+          </div>
+          <div class="campo-ancho">
+            <label>Se usa en</label>
+            <div class="fila-check">
+              <label><input type="checkbox" value="ventas" class="cUsarEn"> Ventas</label>
+              <label><input type="checkbox" value="compras" class="cUsarEn"> Compras</label>
+              <label><input type="checkbox" value="pagos" class="cUsarEn"> Pagos</label>
+              <label><input type="checkbox" value="cobros" class="cUsarEn"> Cobros</label>
+            </div>
+          </div>
+          <div class="campo-ancho">
+            <label>Imagen del QR de cobro (opcional)</label>
+            <p class="sub" style="margin:0 0 6px;">
+              No se genera el QR aquí: la codificación QR es compleja y no queríamos improvisarla.
+              El texto de abajo se arma solo con los datos públicos de la cuenta; conviértalo en QR
+              con la app oficial de su banco y, si quiere, suba aquí esa imagen para guardarla junto a la cuenta.
+            </p>
+            <input type="file" id="cQrArchivo" accept="image/*">
+            <img id="cQrPreview" class="qr-imagen-prev" style="display:none;">
+          </div>
+          <div class="campo-ancho">
+            <label>Texto del QR (datos públicos de cobro)</label>
+            <div class="qr-texto" id="cQrTexto">—</div>
+          </div>
+        </div>
+        <div class="acciones">
+          <button class="btn btn-azul" id="btnGuardarCuenta">Guardar cuenta</button>
+          <button class="btn btn-gris" id="btnCancelarCuenta" style="display:none;">Cancelar edición</button>
+        </div>
+      </div>
+
+      <h3 class="seccion">Cuentas registradas</h3>
+      <div class="tabla-scroll">
+        <table class="datos">
+          <thead>
+            <tr>
+              <th class="izq">Banco</th><th class="izq">Número</th><th class="izq">Alias</th><th class="izq">Titular</th>
+              <th>Moneda</th><th>Estado</th><th class="izq">Se usa en</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="tbCuentas"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- MOVIMIENTOS BANCARIOS -->
+    <section class="panel" id="pMovimientos">
+      <h3 class="seccion">Registrar movimiento bancario</h3>
+      <p class="sub">Alta manual. Mientras no haya integración automática con el banco, esta es la fuente de la verdad.</p>
+      <div class="tarjeta">
+        <div class="grid-form">
+          <div><label>Cuenta</label><select id="mCuenta"></select></div>
+          <div>
+            <label>Tipo</label>
+            <select id="mTipo"><option value="ingreso">Ingreso</option><option value="egreso">Egreso</option></select>
+          </div>
+          <div><label>Monto</label><input id="mMonto" type="number" min="0" step="0.01" placeholder="0.00"></div>
+          <div>
+            <label>Moneda</label>
+            <select id="mMoneda"><option value="CUP">CUP</option><option value="USD">USD</option><option value="MLC">MLC</option></select>
+          </div>
+          <div><label>Fecha</label><input id="mFecha" type="datetime-local"></div>
+          <div><label>Referencia (opcional)</label><input id="mReferencia" type="text"></div>
+          <div class="campo-ancho"><label>Concepto</label><input id="mConcepto" type="text" placeholder="Ej. Pago de cliente, cobro de venta..."></div>
+          <div class="campo-ancho"><label>Nota (opcional)</label><input id="mNota" type="text"></div>
+        </div>
+        <div class="acciones">
+          <button class="btn btn-azul" id="btnRegistrarMov">Registrar movimiento</button>
+        </div>
+      </div>
+
+      <h3 class="seccion">Movimientos</h3>
+      <div class="filtros">
+        <div><label>Cuenta</label><select id="fmCuenta"><option value="">Todas</option></select></div>
+        <div>
+          <label>Estado</label>
+          <select id="fmEstado">
+            <option value="">Todos</option>
+            <option value="registrado">Registrado</option>
+            <option value="conciliado">Conciliado</option>
+            <option value="anulado">Anulado</option>
+          </select>
+        </div>
+        <div><label>Desde</label><input type="date" id="fmDesde"></div>
+        <div><label>Hasta</label><input type="date" id="fmHasta"></div>
+        <button id="btnFiltrarMov">Filtrar</button>
+      </div>
+      <div class="tabla-scroll">
+        <table class="datos">
+          <thead>
+            <tr>
+              <th>Fecha</th><th class="izq">Cuenta</th><th>Tipo</th><th>Monto</th><th class="izq">Concepto</th>
+              <th class="izq">Referencia</th><th>Estado</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="tbMovimientos"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- PASARELAS -->
+    <section class="panel" id="pPasarelas">
+      <h3 class="seccion">Pasarelas de pago</h3>
+      <p class="sub">Estado de las integraciones automáticas. Mientras no estén activas, los movimientos se registran a mano en la pestaña anterior.</p>
+      <div class="tarjetas-pasarela" id="tarjetasPasarela"></div>
+    </section>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/sonidos.js"></script>
+  <script src="js/empresa.js"></script>
+</body>
+</html>

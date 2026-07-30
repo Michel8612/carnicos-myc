@@ -532,6 +532,204 @@ CREATE TABLE IF NOT EXISTS nomina (
   nota TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_nomina_periodo ON nomina(periodo);
+
+-- ============================================================
+--  AUDITORÍA CENTRALIZADA
+-- ============================================================
+-- Todo lo que se crea, cambia o borra en el sistema deja huella aquí.
+-- Es la base de las eliminaciones autorizadas del libro contable y del
+-- historial de almacén: sin esta tabla no se puede saber quién hizo qué.
+-- No se borra nunca desde la aplicación (solo lectura y filtrado).
+CREATE TABLE IF NOT EXISTS auditoria (
+  id SERIAL PRIMARY KEY,
+  fecha TIMESTAMPTZ DEFAULT NOW(),
+  usuario_id INTEGER REFERENCES usuarios(id),
+  usuario_nombre TEXT,
+  rol TEXT,
+  modulo TEXT NOT NULL,        -- ventas, almacen, contabilidad, usuarios, config, sesion...
+  accion TEXT NOT NULL,        -- login, logout, crear, modificar, eliminar, autorizar
+  entidad TEXT,                -- qué objeto se tocó
+  entidad_id TEXT,
+  descripcion TEXT,
+  valor_anterior TEXT,
+  valor_nuevo TEXT,
+  motivo TEXT,
+  -- Cuando alguien actúa con permiso prestado (p. ej. contabilidad
+  -- borrando con clave del administrador), aquí queda quién autorizó.
+  autorizado_por INTEGER REFERENCES usuarios(id),
+  autorizado_nombre TEXT,
+  ip TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_audit_fecha ON auditoria(fecha DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_usuario ON auditoria(usuario_id);
+CREATE INDEX IF NOT EXISTS idx_audit_modulo ON auditoria(modulo);
+CREATE INDEX IF NOT EXISTS idx_audit_accion ON auditoria(accion);
+
+-- ============================================================
+--  CONFIGURACIÓN FISCAL DE LA EMPRESA (fila única)
+-- ============================================================
+-- Datos oficiales del negocio: los necesitan las facturas y los
+-- reportes que se presentan a la ONAT.
+CREATE TABLE IF NOT EXISTS empresa_fiscal (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  nombre_fiscal TEXT,
+  razon_social TEXT,
+  nit TEXT,
+  direccion TEXT,
+  provincia TEXT,
+  municipio TEXT,
+  telefono TEXT,
+  correo TEXT,
+  moneda_principal TEXT DEFAULT 'CUP',
+  monedas_secundarias TEXT,     -- JSON: ["USD","MLC"]
+  regimen_tributario TEXT,
+  datos_facturacion TEXT,       -- JSON libre (pie de factura, serie...)
+  datos_reportes TEXT,          -- JSON libre (encabezados oficiales)
+  actualizado_en TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
+--  CUENTAS BANCARIAS
+-- ============================================================
+CREATE TABLE IF NOT EXISTS cuentas_bancarias (
+  id SERIAL PRIMARY KEY,
+  banco TEXT NOT NULL,
+  numero TEXT NOT NULL,
+  alias TEXT,
+  titular TEXT,
+  moneda TEXT NOT NULL DEFAULT 'CUP',
+  estado TEXT NOT NULL DEFAULT 'activa' CHECK (estado IN ('activa', 'inactiva')),
+  usar_en TEXT,                 -- JSON: ["ventas","compras","pagos","cobros"]
+  -- El QR guarda SOLO lo público (alias/número de cobro), nunca claves.
+  qr_datos TEXT,
+  qr_imagen TEXT,               -- data URL, opcional
+  creado_en TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
+--  MOVIMIENTOS BANCARIOS Y CONCILIACIÓN
+-- ============================================================
+-- Mientras no haya integración oficial con el banco, se registran a
+-- mano. La estructura ya contempla el día que llegue la integración:
+-- "origen" dirá de qué pasarela vino y "estado" si está conciliado.
+CREATE TABLE IF NOT EXISTS movimientos_bancarios (
+  id SERIAL PRIMARY KEY,
+  cuenta_id INTEGER NOT NULL REFERENCES cuentas_bancarias(id),
+  fecha TIMESTAMPTZ DEFAULT NOW(),
+  tipo TEXT NOT NULL CHECK (tipo IN ('ingreso', 'egreso')),
+  monto DOUBLE PRECISION NOT NULL,
+  moneda TEXT NOT NULL DEFAULT 'CUP',
+  concepto TEXT,
+  referencia TEXT,
+  origen TEXT NOT NULL DEFAULT 'manual',   -- manual, enzona, transfermovil
+  origen_referencia TEXT,                   -- id de la pasarela, si viene de una
+  estado TEXT NOT NULL DEFAULT 'registrado'
+    CHECK (estado IN ('registrado', 'conciliado', 'anulado')),
+  conciliado_tipo TEXT,        -- venta, compra, gasto...
+  conciliado_id INTEGER,
+  conciliado_en TIMESTAMPTZ,
+  usuario_id INTEGER REFERENCES usuarios(id),
+  nota TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_movban_cuenta ON movimientos_bancarios(cuenta_id, fecha DESC);
+CREATE INDEX IF NOT EXISTS idx_movban_estado ON movimientos_bancarios(estado);
+
+-- ============================================================
+--  CATEGORÍAS DE GASTO CONFIGURABLES
+-- ============================================================
+-- Antes estaban fijas en el código. Ahora el dueño puede crear las
+-- suyas. Las de fábrica (fija=1) no se pueden borrar porque hay
+-- cálculos que dependen de ellas (p. ej. 'nomina' para la seguridad social).
+CREATE TABLE IF NOT EXISTS categorias_gasto (
+  clave TEXT PRIMARY KEY,
+  etiqueta TEXT NOT NULL,
+  deducible INTEGER NOT NULL DEFAULT 1,
+  fija INTEGER NOT NULL DEFAULT 0,
+  activa INTEGER NOT NULL DEFAULT 1,
+  creado_en TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
+--  CORRECCIONES MANUALES DE TRIBUTACIÓN
+-- ============================================================
+-- El cálculo automático es una ayuda, no un dogma: el contador puede
+-- sustituir cualquier cifra. Cada corrección queda con su motivo y su
+-- autor para que una auditoría futura pueda reconstruirlo todo.
+CREATE TABLE IF NOT EXISTS tributacion_correcciones (
+  id SERIAL PRIMARY KEY,
+  periodo_desde DATE,
+  periodo_hasta DATE,
+  clave TEXT NOT NULL,          -- qué cifra se corrige (ventas_brutas, un tributo...)
+  etiqueta TEXT,
+  valor_anterior DOUBLE PRECISION,
+  valor_nuevo DOUBLE PRECISION NOT NULL,
+  motivo TEXT NOT NULL,
+  usuario_id INTEGER REFERENCES usuarios(id),
+  usuario_nombre TEXT,
+  fecha TIMESTAMPTZ DEFAULT NOW(),
+  anulada INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_tribcorr_periodo ON tributacion_correcciones(periodo_desde, periodo_hasta);
+
+-- ============================================================
+--  DOCUMENTOS LEGALES Y SU ACEPTACIÓN
+-- ============================================================
+CREATE TABLE IF NOT EXISTS documentos_legales (
+  id SERIAL PRIMARY KEY,
+  tipo TEXT NOT NULL,           -- terminos, privacidad, datos
+  version TEXT NOT NULL,
+  titulo TEXT,
+  contenido TEXT NOT NULL,
+  vigente INTEGER NOT NULL DEFAULT 1,
+  creado_en TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS aceptaciones_legales (
+  id SERIAL PRIMARY KEY,
+  usuario_id INTEGER REFERENCES usuarios(id),
+  usuario_nombre TEXT,
+  documento_id INTEGER REFERENCES documentos_legales(id),
+  tipo TEXT,
+  version TEXT,
+  fecha TIMESTAMPTZ DEFAULT NOW(),
+  ip TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_acept_usuario ON aceptaciones_legales(usuario_id);
+
+-- ============================================================
+--  SESIONES ACTIVAS
+-- ============================================================
+-- Permite ver quién está dentro, cerrar sesiones y caducarlas por
+-- inactividad. El token sigue siendo JWT; aquí se guarda su "jti"
+-- para poder invalidarlo antes de que expire por sí solo.
+CREATE TABLE IF NOT EXISTS sesiones (
+  id SERIAL PRIMARY KEY,
+  usuario_id INTEGER NOT NULL REFERENCES usuarios(id),
+  jti TEXT UNIQUE,
+  creada_en TIMESTAMPTZ DEFAULT NOW(),
+  ultima_actividad TIMESTAMPTZ DEFAULT NOW(),
+  expira_en TIMESTAMPTZ,
+  cerrada INTEGER NOT NULL DEFAULT 0,
+  ip TEXT,
+  agente TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sesiones_usuario ON sesiones(usuario_id, cerrada);
+
+-- ============================================================
+--  AUTORIZACIONES YA GASTADAS
+-- ============================================================
+-- El permiso temporal que firma un administrador (para que
+-- contabilidad pueda borrar del libro) dura 5 minutos. Sin esta tabla,
+-- dentro de esa ventana el mismo permiso serviría para borrar muchas
+-- cosas: el administrador autorizó UNA acción, no un rato entero.
+-- Aquí se anota el identificador del permiso en cuanto se usa, para
+-- que un segundo intento con el mismo sea rechazado.
+CREATE TABLE IF NOT EXISTS autorizaciones_usadas (
+  jti TEXT PRIMARY KEY,
+  usada_en TIMESTAMPTZ DEFAULT NOW(),
+  usada_por INTEGER REFERENCES usuarios(id),
+  accion TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_autz_usada_en ON autorizaciones_usadas(usada_en);
 `;
 
 export default SCHEMA_SQL;

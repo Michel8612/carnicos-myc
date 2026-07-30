@@ -144,12 +144,45 @@ async function cargarLibro() {
   document.getElementById('lGanancia').textContent = money(d.totales.ganancia);
 
   tb.querySelectorAll('.btn-x').forEach((b) => {
-    b.addEventListener('click', async () => {
-      if (!confirm('¿Eliminar este apunte del libro? No se puede deshacer.')) return;
-      try { await API.contabBorrarLinea(Number(b.dataset.id)); await cargarLibro(); await cargarResumen(); }
-      catch (e) { alert(e.message); }
-    });
+    b.addEventListener('click', () => borrarLineaLibro(Number(b.dataset.id)));
   });
+}
+
+// ---------- Borrado del libro: dueño/admin directo, contabilidad con
+// permiso prestado de un administrador (reautenticación). ----------
+const rolEsAdmin = () => ['dueno', 'admin', 'proveedor'].includes((getUsuario() || {}).rol);
+
+async function pedirAutorizacionAdmin() {
+  const usuario = prompt('Para borrar del libro hace falta autorización de un administrador.\nUsuario del administrador:');
+  if (!usuario || !usuario.trim()) return null;
+  const clave = prompt('Contraseña del administrador:');
+  if (!clave) return null;
+  try {
+    const r = await API.reautenticar(usuario.trim(), clave);
+    // POST /auth/reautenticar devuelve { tokenAutorizacion, expiraEn, autorizadoPor }.
+    const token = r && r.tokenAutorizacion;
+    if (!token) { alert('El servidor no devolvió un permiso de autorización utilizable.'); return null; }
+    return token;
+  } catch (e) {
+    alert('No se pudo autorizar: ' + e.message);
+    return null;
+  }
+}
+
+async function borrarLineaLibro(id) {
+  if (!confirm('¿Eliminar este apunte del libro? No se puede deshacer.')) return;
+  const motivo = prompt('Motivo del borrado (obligatorio):');
+  if (!motivo || !motivo.trim()) { alert('Debe indicar un motivo.'); return; }
+  try {
+    if (rolEsAdmin()) {
+      await apiFetch(`/contabilidad/libro/${id}`, { method: 'DELETE', body: JSON.stringify({ motivo: motivo.trim() }) });
+    } else {
+      const autorizacion = await pedirAutorizacionAdmin();
+      if (!autorizacion) return;
+      await API.borrarLibroAutorizado({ ids: [id], motivo: motivo.trim(), autorizacion });
+    }
+    await cargarLibro(); await cargarResumen();
+  } catch (e) { alert(e.message); }
 }
 
 document.getElementById('btnFiltrar').addEventListener('click', cargarLibro);
@@ -160,8 +193,17 @@ document.getElementById('btnBorrarLote').addEventListener('click', async () => {
     return;
   }
   if (!confirm('¿Eliminar TODOS los apuntes que coinciden con el filtro? No se puede deshacer.')) return;
+  const motivo = prompt('Motivo del borrado (obligatorio):');
+  if (!motivo || !motivo.trim()) { alert('Debe indicar un motivo.'); return; }
   try {
-    const r = await API.contabBorrarVarias(f);
+    let r;
+    if (rolEsAdmin()) {
+      r = await API.contabBorrarVarias({ ...f, motivo: motivo.trim() });
+    } else {
+      const autorizacion = await pedirAutorizacionAdmin();
+      if (!autorizacion) return;
+      r = await API.borrarLibroAutorizado({ ...f, motivo: motivo.trim(), autorizacion });
+    }
     alert(`Se eliminaron ${r.borrados} apuntes.`);
     await cargarLibro(); await cargarResumen();
   } catch (e) { alert(e.message); }
@@ -248,11 +290,74 @@ async function cargarGastos() {
         <td>${money(f.monto)}</td>
         <td>${esc(f.moneda)}</td>
         <td class="izq">${esc(f.nota || '')}</td>
+        <td><button class="btn-x" data-id="${f.id}" title="Eliminar gasto">✕</button></td>
       </tr>`).join('')
-    : '<tr><td colspan="6" class="vacio">No hay gastos registrados en este mes.</td></tr>';
+    : '<tr><td colspan="7" class="vacio">No hay gastos registrados en este mes.</td></tr>';
+
+  tb.querySelectorAll('.btn-x').forEach((b) => {
+    b.addEventListener('click', async () => {
+      if (!confirm('¿Eliminar este gasto? También se elimina su egreso de caja asociado. No se puede deshacer.')) return;
+      const motivo = prompt('Motivo del borrado (obligatorio):');
+      if (!motivo || !motivo.trim()) { alert('Debe indicar un motivo.'); return; }
+      try {
+        await API.borrarGasto(Number(b.dataset.id), motivo.trim());
+        await cargarGastos();
+        await cargarResumen();
+      } catch (e) { alert('No se pudo borrar: ' + e.message); }
+    });
+  });
+
+  await cargarCategoriasAdmin();
 }
 
 document.getElementById('btnVerGastos').addEventListener('click', cargarGastos);
+
+// ---------- Categorías de gasto (ver, crear, desactivar) ----------
+async function cargarCategoriasAdmin() {
+  let filas;
+  try { filas = await apiFetch('/costos/categorias?todas=1'); }
+  catch (e) { document.getElementById('tbCategorias').innerHTML = `<tr><td colspan="5" class="vacio">${esc(e.message)}</td></tr>`; return; }
+
+  const tb = document.getElementById('tbCategorias');
+  tb.innerHTML = filas.length
+    ? filas.map((c) => `
+      <tr class="${c.activa ? '' : 'cat-inactiva'} ${c.fija ? 'cat-fija' : ''}">
+        <td class="izq">${esc(c.clave)}</td>
+        <td class="izq">${esc(c.etiqueta)}</td>
+        <td>${c.deducible ? 'Sí' : 'No'}</td>
+        <td>${c.fija ? 'De fábrica' : (c.activa ? 'Activa' : 'Desactivada')}</td>
+        <td>${c.fija ? '' : (c.activa ? `<button class="btn-x" data-clave="${esc(c.clave)}">Borrar</button>` : '')}</td>
+      </tr>`).join('')
+    : '<tr><td colspan="5" class="vacio">No hay categorías.</td></tr>';
+
+  tb.querySelectorAll('.btn-x').forEach((b) => {
+    b.addEventListener('click', async () => {
+      if (!confirm(`¿Borrar la categoría "${b.dataset.clave}"? Si tiene gastos registrados, se desactivará en vez de borrarse.`)) return;
+      try {
+        const r = await API.borrarCategoriaGasto(b.dataset.clave);
+        if (r.desactivada) alert(r.mensaje || 'La categoría se desactivó (tenía gastos asociados).');
+        categoriasGastoCache = null; // se refresca el <select> del formulario
+        await cargarCategoriasGasto();
+        await cargarCategoriasAdmin();
+      } catch (e) { alert('No se pudo borrar: ' + e.message); }
+    });
+  });
+}
+
+document.getElementById('btnCrearCategoria').addEventListener('click', async () => {
+  const clave = document.getElementById('cClave').value.trim().toLowerCase();
+  const etiqueta = document.getElementById('cEtiqueta').value.trim();
+  const deducible = document.getElementById('cDeducible').value === '1';
+  if (!clave || !etiqueta) { alert('Indique clave y etiqueta.'); return; }
+  try {
+    await API.crearCategoriaGasto({ clave, etiqueta, deducible });
+    document.getElementById('cClave').value = '';
+    document.getElementById('cEtiqueta').value = '';
+    categoriasGastoCache = null;
+    await cargarCategoriasGasto();
+    await cargarCategoriasAdmin();
+  } catch (e) { alert('No se pudo crear la categoría: ' + e.message); }
+});
 
 document.getElementById('btnRegistrarGasto').addEventListener('click', async () => {
   const d = {
@@ -356,6 +461,7 @@ document.getElementById('btnRegistrarNomina').addEventListener('click', async ()
 
 // ---------- Tributación (estimado, a partir de lo ya registrado) ----------
 let regimenesTributariosCache = null; // se llena una vez con GET /tributacion/regimenes
+let ultimoPeriodoTributacion = null;  // { desde, hasta } del último cálculo mostrado
 
 // Muestra u oculta los campos de fecha según el período elegido.
 document.getElementById('tPeriodo').addEventListener('change', () => {
@@ -372,6 +478,8 @@ document.getElementById('tTipoEmpresa').addEventListener('change', async () => {
   const tipo_empresa = document.getElementById('tTipoEmpresa').value;
   try { await apiFetch('/contabilidad/tributacion/tipo-empresa', { method: 'PUT', body: JSON.stringify({ tipo_empresa }) }); }
   catch (e) { /* si falla el guardado, no impide seguir viendo el cálculo */ }
+  document.getElementById('panelRegimenOtro').classList.toggle('oculto', tipo_empresa !== 'otro');
+  if (tipo_empresa === 'otro') await cargarRegimenOtro();
   await cargarTributacion();
 });
 
@@ -383,6 +491,106 @@ const nombreBase = (b) => ({
   nomina: 'Nómina',
 }[b] || b);
 
+// ---------- Régimen "Otro": editor de tributos propios ----------
+let basesValidasCache = ['utilidad_neta', 'ventas_brutas', 'nomina'];
+
+function filaRegimenOtro(t) {
+  const tr = document.createElement('tr');
+  const opciones = basesValidasCache.map((b) => `<option value="${b}" ${t.base === b ? 'selected' : ''}>${nombreBase(b)}</option>`).join('');
+  tr.innerHTML = `
+    <td class="izq"><input type="text" class="ro-nombre" value="${esc(t.nombre || '')}" placeholder="Nombre del tributo"></td>
+    <td><select class="ro-base">${opciones}</select></td>
+    <td><input type="number" class="ro-porcentaje" min="0" step="0.01" value="${t.porcentaje ?? 0}"></td>
+    <td><input type="number" class="ro-minimo" min="0" step="0.01" value="${t.minimo_exento ?? 0}"></td>
+    <td><button class="btn-x ro-quitar" type="button">✕</button></td>`;
+  tr.querySelector('.ro-quitar').addEventListener('click', () => tr.remove());
+  return tr;
+}
+
+async function cargarRegimenOtro() {
+  let d;
+  try { d = await API.regimenPersonalizado(); }
+  catch (e) { alert('No se pudo cargar el régimen "Otro": ' + e.message); return; }
+  basesValidasCache = d.bases_validas && d.bases_validas.length ? d.bases_validas : basesValidasCache;
+  const tb = document.getElementById('tbRegimenOtro');
+  tb.innerHTML = '';
+  (d.tributos || []).forEach((t) => tb.appendChild(filaRegimenOtro(t)));
+}
+
+document.getElementById('btnAnadirTributoOtro').addEventListener('click', () => {
+  document.getElementById('tbRegimenOtro').appendChild(
+    filaRegimenOtro({ nombre: '', base: basesValidasCache[0], porcentaje: 0, minimo_exento: 0 })
+  );
+});
+
+document.getElementById('btnGuardarRegimenOtro').addEventListener('click', async () => {
+  const filas = [...document.querySelectorAll('#tbRegimenOtro tr')];
+  const tributos = filas.map((tr) => ({
+    clave: tr.querySelector('.ro-nombre').value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, ''),
+    nombre: tr.querySelector('.ro-nombre').value.trim(),
+    base: tr.querySelector('.ro-base').value,
+    porcentaje: Number(tr.querySelector('.ro-porcentaje').value),
+    minimo_exento: Number(tr.querySelector('.ro-minimo').value) || 0,
+  }));
+  if (tributos.some((t) => !t.nombre)) { alert('Todos los tributos necesitan un nombre.'); return; }
+  try {
+    await API.guardarRegimenPersonalizado({ tributos });
+    alert('Régimen "Otro" guardado.');
+    await cargarTributacion();
+  } catch (e) { alert('No se pudo guardar: ' + e.message); }
+});
+
+// ---------- Corrección manual de cifras calculadas ----------
+// Dos prompts sencillos (valor nuevo, luego motivo) en vez de un modal:
+// mismo estilo minimalista que el resto de la pantalla (confirm/prompt).
+async function corregirCifra(clave, etiqueta, valorActual) {
+  const nuevo = prompt(`Nuevo valor para "${etiqueta}" (actual: ${money(valorActual)}):`, valorActual);
+  if (nuevo === null) return;
+  const nuevoNum = Number(nuevo);
+  if (!Number.isFinite(nuevoNum)) { alert('El valor debe ser un número.'); return; }
+  const motivo = prompt('Motivo de la corrección (obligatorio):');
+  if (!motivo || !motivo.trim()) { alert('Debe indicar un motivo.'); return; }
+  if (!ultimoPeriodoTributacion) { alert('Calcule primero la tributación del período.'); return; }
+  try {
+    await API.corregirTributacion({
+      periodo_desde: ultimoPeriodoTributacion.desde,
+      periodo_hasta: ultimoPeriodoTributacion.hasta,
+      clave, etiqueta,
+      valor_anterior: valorActual,
+      valor_nuevo: nuevoNum,
+      motivo: motivo.trim(),
+    });
+    await cargarTributacion();
+  } catch (e) { alert('No se pudo guardar la corrección: ' + e.message); }
+}
+
+document.querySelectorAll('#pTributacion .btn-lapiz').forEach((b) => {
+  b.addEventListener('click', () => {
+    // El valor real se guarda en data-valor del <span> (nunca se parsea
+    // el texto formateado con money(): "1.234,56" rompería con un
+    // parseo ingenuo por el separador de miles/decimales de es-CU).
+    const valorSpan = b.previousElementSibling;
+    const valorActual = Number(valorSpan.dataset.valor) || 0;
+    corregirCifra(b.dataset.clave, b.dataset.etiqueta, valorActual);
+  });
+});
+
+// Pinta el "corregido" (marca roja + tooltip) de una tarjeta, o lo
+// oculta si no hay corrección vigente para esa cifra.
+function marcarCorreccion(idTarjeta, idMarca, correccion) {
+  const tarj = document.getElementById(idTarjeta);
+  const marca = document.getElementById(idMarca);
+  if (correccion) {
+    tarj.classList.add('corregida');
+    marca.classList.remove('oculto');
+    marca.title = `Corregido por ${correccion.usuario_nombre || '—'} el ${fechaHora(correccion.fecha)}. Motivo: ${correccion.motivo}`;
+    marca.textContent = `Corregido: ${correccion.motivo}`;
+  } else {
+    tarj.classList.remove('corregida');
+    marca.classList.add('oculto');
+  }
+}
+
 async function cargarTributacion() {
   // Primero, los regímenes vigentes (una sola vez): sirve para
   // inicializar el selector de tipo de empresa con lo ya guardado y
@@ -392,6 +600,9 @@ async function cargarTributacion() {
       regimenesTributariosCache = await API.regimenesTributarios();
       document.getElementById('tTipoEmpresa').value = regimenesTributariosCache.tipo_empresa_actual || 'microempresa';
       document.getElementById('tribAvisoLegal').textContent = regimenesTributariosCache.aviso_legal;
+      const esOtro = document.getElementById('tTipoEmpresa').value === 'otro';
+      document.getElementById('panelRegimenOtro').classList.toggle('oculto', !esOtro);
+      if (esOtro) await cargarRegimenOtro();
     } catch (e) { /* si falla, seguimos con los valores por defecto del HTML */ }
   }
 
@@ -410,14 +621,30 @@ async function cargarTributacion() {
   try { d = await API.tributacion(params); }
   catch (e) { alert('No se pudo calcular la tributación: ' + e.message); return; }
 
-  document.getElementById('tVentasBrutas').textContent = money(d.ventas_brutas);
-  document.getElementById('tGastosDeducibles').textContent = money(d.gastos_deducibles.total);
-  document.getElementById('tUtilidadNeta').textContent = money(d.utilidad_neta);
-  document.getElementById('tBaseImponible').textContent = money(d.base_imponible);
+  ultimoPeriodoTributacion = { desde: d.resumen.desde, hasta: d.resumen.hasta };
+
+  // Además del texto formateado, se guarda el número crudo en
+  // data-valor: lo usa el lapicito de corrección para no tener que
+  // parsear "1.234,56" (formato es-CU) desde el texto ya formateado.
+  const pintarCifra = (id, valor) => {
+    const el = document.getElementById(id);
+    el.textContent = money(valor);
+    el.dataset.valor = valor;
+  };
+  pintarCifra('tVentasBrutas', d.ventas_brutas);
+  pintarCifra('tGastosDeducibles', d.gastos_deducibles.total);
+  pintarCifra('tUtilidadNeta', d.utilidad_neta);
+  pintarCifra('tBaseImponible', d.base_imponible);
   document.getElementById('tTotalTributar').textContent = money(d.total_tributos);
   document.getElementById('tribRegimenNombre').textContent = d.resumen.regimen_nombre;
   document.getElementById('tribResumenPeriodo').textContent =
     `Período: ${esc(d.resumen.periodo)} · del ${d.resumen.desde} al ${d.resumen.hasta}`;
+
+  const cv = d.correcciones_vigentes || {};
+  marcarCorreccion('tarjVentasBrutas', 'mVentasBrutas', cv.ventas_brutas);
+  marcarCorreccion('tarjGastosDeducibles', 'mGastosDeducibles', cv.gastos_deducibles || d.gastos_deducibles.correccion);
+  marcarCorreccion('tarjUtilidadNeta', 'mUtilidadNeta', cv.utilidad_neta);
+  marcarCorreccion('tarjBaseImponible', 'mBaseImponible', cv.base_imponible);
 
   const tbT = document.getElementById('tbTributos');
   tbT.innerHTML = d.tributos.length
@@ -427,9 +654,17 @@ async function cargarTributacion() {
         <td>${esc(nombreBase(t.base))}</td>
         <td>${money(t.base_valor)}</td>
         <td>${t.porcentaje}%</td>
-        <td>${money(t.importe)}</td>
+        <td>
+          ${money(t.importe)}
+          <button class="btn-lapiz" data-clave="tributo.${esc(t.clave)}" data-etiqueta="${esc(t.nombre)}" data-valor="${t.importe}" title="Corregir este importe">✎</button>
+          ${t.corregido ? `<span class="marca-corregido" title="Corregido por ${esc(t.correccion.usuario_nombre || '—')} el ${fechaHora(t.correccion.fecha)}. Motivo: ${esc(t.correccion.motivo)}">Corregido: ${esc(t.correccion.motivo)}</span>` : ''}
+        </td>
       </tr>`).join('')
     : '<tr><td colspan="5" class="vacio">Sin tributos configurados.</td></tr>';
+
+  tbT.querySelectorAll('.btn-lapiz').forEach((b) => {
+    b.addEventListener('click', () => corregirCifra(b.dataset.clave, b.dataset.etiqueta, Number(b.dataset.valor) || 0));
+  });
 
   const tbG = document.getElementById('tbGastosCategoria');
   tbG.innerHTML = d.gastos_deducibles.por_categoria.length
@@ -441,6 +676,46 @@ async function cargarTributacion() {
   ul.innerHTML = d.advertencias.length
     ? d.advertencias.map((a) => `<li>${esc(a)}</li>`).join('')
     : '<li>Sin advertencias.</li>';
+
+  await cargarCorreccionesVigentes();
+}
+
+// ---------- Tabla de correcciones vigentes (con opción de anular) ----------
+async function cargarCorreccionesVigentes() {
+  if (!ultimoPeriodoTributacion) return;
+  let filas;
+  try {
+    filas = await API.correccionesTributacion({
+      desde: ultimoPeriodoTributacion.desde,
+      hasta: ultimoPeriodoTributacion.hasta,
+    });
+  } catch (e) {
+    document.getElementById('tbCorrecciones').innerHTML = `<tr><td colspan="7" class="vacio">${esc(e.message)}</td></tr>`;
+    return;
+  }
+  const tb = document.getElementById('tbCorrecciones');
+  tb.innerHTML = filas.length
+    ? filas.map((c) => `
+      <tr>
+        <td class="izq">${esc(c.etiqueta || c.clave)}</td>
+        <td>${c.valor_anterior == null ? '—' : money(c.valor_anterior)}</td>
+        <td>${money(c.valor_nuevo)}</td>
+        <td class="izq">${esc(c.motivo)}</td>
+        <td>${esc(c.usuario_nombre || '')}</td>
+        <td>${fechaHora(c.fecha)}</td>
+        <td><button class="btn-x" data-id="${c.id}">Anular</button></td>
+      </tr>`).join('')
+    : '<tr><td colspan="7" class="vacio">No hay correcciones vigentes en este período.</td></tr>';
+
+  tb.querySelectorAll('.btn-x').forEach((b) => {
+    b.addEventListener('click', async () => {
+      if (!confirm('¿Anular esta corrección? Volverá a mostrarse el cálculo automático para esa cifra.')) return;
+      try {
+        await API.anularCorreccionTributacion(Number(b.dataset.id));
+        await cargarTributacion();
+      } catch (e) { alert('No se pudo anular: ' + e.message); }
+    });
+  });
 }
 
 cargarResumen();

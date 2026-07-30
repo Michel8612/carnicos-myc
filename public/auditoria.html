@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Auditoría - Cárnicos M&C</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    /* Header oscuro, igual patrón que las demás pantallas internas. */
+    header {
+      text-align: center;
+      padding: 18px 20px 20px;
+      background: #37474f;
+      color: #fff;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+    }
+    .logo-auditoria {
+      width: 74px; height: 74px; object-fit: contain; display: block;
+      margin: 0 auto 8px auto; background: #fff; border-radius: 50%;
+      padding: 6px; box-shadow: 0 2px 8px rgba(0,0,0,.3);
+    }
+    header h1 { color: #fff; font-size: 24px; letter-spacing: .5px; text-shadow: 0 1px 3px rgba(0,0,0,.4); margin: 6px 0; }
+
+    .aud-wrap { max-width: 1300px; margin: 0 auto; padding: 0 12px 40px; }
+
+    /* Tarjetas (mismo patrón que contabilidad.html) */
+    .tarjetas { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin:16px 0; }
+    .tarjeta { background:#fff; border-radius:12px; padding:14px; text-align:center; box-shadow:0 3px 10px rgba(0,0,0,.12); }
+    .tarjeta .n { font-size:22px; font-weight:bold; color:#37474f; }
+    .tarjeta .l { font-size:12px; color:#666; margin-top:3px; }
+
+    /* Filtros */
+    .filtros { display:flex; gap:10px; flex-wrap:wrap; align-items:end; background:#fff; padding:14px;
+      border-radius:12px; box-shadow:0 3px 10px rgba(0,0,0,.12); margin: 16px 0; }
+    .filtros div { min-width: 140px; }
+    .filtros label { display:block; font-size:12px; color:#555; margin-bottom:3px; }
+    .filtros select, .filtros input { width: 100%; box-sizing: border-box; padding:8px; border:1px solid #cfd8dc; border-radius:8px; font-size:14px; }
+    .filtros button { padding:9px 16px; border:none; border-radius:8px; cursor:pointer; font-size:14px; background:#37474f; color:#fff; align-self: end; }
+    .filtros button:hover { background:#263238; }
+
+    /* Tabla */
+    .tabla-scroll { overflow-x:auto; margin-top:10px; }
+    table.datos { width:100%; border-collapse:collapse; background:#fff; border-radius:12px; overflow:hidden;
+      box-shadow:0 3px 10px rgba(0,0,0,.12); min-width:1050px; }
+    table.datos th { background:#cfd8dc; padding:10px 8px; font-size:12.5px; text-align:center; }
+    table.datos td { border-top:1px solid #eceff1; padding:8px; font-size:13px; text-align:center; vertical-align: top; }
+    table.datos td.izq, table.datos th.izq { text-align:left; }
+    .vacio { text-align:center; color:#777; padding:24px; }
+
+    .etq { display:inline-block; padding:3px 9px; border-radius:10px; font-size:11.5px; font-weight:bold; white-space: nowrap; }
+    .e-login { background:#e8f5e9; color:#2e7d32; }
+    .e-login_fallido { background:#ffebee; color:#c62828; }
+    .e-logout { background:#eceff1; color:#455a64; }
+    .e-crear { background:#e3f2fd; color:#1565C0; }
+    .e-modificar { background:#fff3e0; color:#e65100; }
+    .e-eliminar { background:#ffebee; color:#c62828; }
+    .e-autorizar { background:#f3e5f5; color:#6a1b9a; }
+    .e-otra { background:#eceff1; color:#455a64; }
+
+    .valores-cambio { text-align: left; font-size: 12px; }
+    .valores-cambio .antes { color:#c62828; }
+    .valores-cambio .despues { color:#2e7d32; }
+    .valores-cambio div { margin-bottom: 2px; word-break: break-word; }
+
+    h3.seccion { margin:22px 0 4px; color:#283593; font-size:17px; }
+    p.sub { margin:0 0 10px; font-size:12.5px; color:#777; }
+  </style>
+</head>
+
+<body>
+  <header>
+    <img src="img/logo.png" alt="Cárnicos M&C" class="logo-auditoria">
+    <h1>Auditoría</h1>
+    <div class="top-nav">
+      <a href="#" id="navPanel" style="display:none;">← Panel</a>
+      <a href="#" onclick="logout();return false;">Salir</a>
+    </div>
+  </header>
+
+  <main class="aud-wrap">
+    <p class="sub" style="text-align:center;margin-top:14px;">
+      Quién hizo qué y cuándo: entradas y salidas de sesión, altas, cambios, borrados y
+      autorizaciones. Este registro no se puede editar ni borrar desde aquí.
+    </p>
+
+    <div class="tarjetas">
+      <div class="tarjeta"><div class="n" id="kTotal">0</div><div class="l">Registros que cumplen el filtro</div></div>
+      <div class="tarjeta"><div class="n" id="kMostrados">0</div><div class="l">Mostrados en esta página</div></div>
+    </div>
+
+    <h3 class="seccion">Filtros</h3>
+    <div class="filtros">
+      <div>
+        <label>Usuario</label>
+        <select id="fUsuario"><option value="">Todos</option></select>
+      </div>
+      <div>
+        <label>Módulo</label>
+        <select id="fModulo"><option value="">Todos</option></select>
+      </div>
+      <div>
+        <label>Acción</label>
+        <select id="fAccion"><option value="">Todas</option></select>
+      </div>
+      <div><label>Desde</label><input type="date" id="fDesde"></div>
+      <div><label>Hasta</label><input type="date" id="fHasta"></div>
+      <div>
+        <label>Límite</label>
+        <select id="fLimite">
+          <option value="200">200</option>
+          <option value="500">500</option>
+          <option value="1000">1000</option>
+        </select>
+      </div>
+      <button id="btnFiltrar">Filtrar</button>
+      <button id="btnLimpiar" style="background:#607d8b;">Limpiar</button>
+    </div>
+
+    <div class="tabla-scroll">
+      <table class="datos">
+        <thead>
+          <tr>
+            <th>Fecha y hora</th>
+            <th class="izq">Usuario</th>
+            <th>Rol</th>
+            <th>Módulo</th>
+            <th>Acción</th>
+            <th class="izq">Entidad</th>
+            <th class="izq">Descripción</th>
+            <th class="izq">Cambio</th>
+            <th class="izq">Motivo</th>
+            <th class="izq">Autorizó</th>
+          </tr>
+        </thead>
+        <tbody id="tbAuditoria"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/sonidos.js"></script>
+  <script src="js/auditoria.js"></script>
+</body>
+</html>

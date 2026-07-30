@@ -237,6 +237,38 @@
     </div>
   </div>
 
+  <!-- Popup: elegir cantidad al tocar una tarjeta del catálogo -->
+  <div class="modal-fondo" id="modalCantidad">
+    <div class="modal-caja">
+      <h2>Agregar al carrito</h2>
+      <div class="mc-prod">
+        <div class="cat-img mc-img" id="mcImgBox"></div>
+        <div class="mc-datos">
+          <div class="mc-nombre" id="mcNombre"></div>
+          <div class="mc-precio" id="mcPrecio"></div>
+          <div id="mcPrecioUsd"></div>
+          <div class="mc-existencia" id="mcExistencia"></div>
+        </div>
+      </div>
+      <label>Cantidad</label>
+      <div class="mc-cant-fila">
+        <button type="button" class="mc-paso" id="mcMenos" title="Quitar" aria-label="Quitar">−</button>
+        <input type="number" id="mcCantidad" inputmode="decimal" min="0" step="1" value="1">
+        <button type="button" class="mc-paso" id="mcMas" title="Agregar" aria-label="Agregar">+</button>
+      </div>
+      <div class="mc-subtotal-fila">
+        <span>Subtotal</span>
+        <b id="mcSubtotal">0.00</b>
+      </div>
+      <div class="mc-subtotal-usd" id="mcSubtotalUsd"></div>
+      <p class="modal-err" id="mcError"></p>
+      <div class="modal-acc">
+        <button class="b-cancelar" id="mcCancelar">Cancelar</button>
+        <button class="b-guardar" id="mcConfirmar">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
   <script src="js/api.js"></script>
   <script src="js/sonidos.js"></script>
   <script src="js/tasas.js"></script>

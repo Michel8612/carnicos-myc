@@ -40,6 +40,10 @@ import recetasRoutes from './routes/recetas.js';
 import contabilidadRoutes from './routes/contabilidad.js';
 import configRoutes from './routes/config.js';
 import tasasRoutes from './routes/tasas.js';
+import auditoriaRoutes from './routes/auditoria.js';
+import empresaRoutes from './routes/empresa.js';
+import bancosRoutes from './routes/bancos.js';
+import legalRoutes from './routes/legal.js';
 import licenciaRoutes, { bloqueoPorLicencia } from './licencia/rutas.js';
 import { inicializarLicencia } from './licencia/licencia.js';
 import { requiereSesion, escrituraSoloRoles } from './middleware/auth.js';
@@ -117,6 +121,16 @@ app.use('/api/contabilidad', contabilidadRoutes);
 // Tasa del dólar (elTOQUE): leerla puede cualquiera con sesión; fijarla
 // a mano o forzar la actualización, solo el dueño.
 app.use('/api/tasas', requiereSesion, escrituraSoloRoles(), tasasRoutes);
+// Auditoría: solo se lee, nunca se escribe ni se borra desde fuera.
+// El propio router restringe quién puede mirarla.
+app.use('/api/auditoria', requiereSesion, auditoriaRoutes);
+// Datos fiscales del negocio: los mira quien tenga sesión, los cambia el dueño.
+app.use('/api/empresa', requiereSesion, escrituraSoloRoles(), empresaRoutes);
+// Cuentas y movimientos bancarios: escribe el dueño y contabilidad.
+app.use('/api/bancos', requiereSesion, escrituraSoloRoles('contabilidad'), bancosRoutes);
+// Documentos legales: hay que poder leerlos y aceptarlos ANTES de tener
+// acceso al resto, por eso el control de sesión lo hace el router.
+app.use('/api/legal', legalRoutes);
 
 // ---- Middleware de errores: cualquier fallo en una ruta cae aquí ----
 // Devuelve un JSON claro con 500 en vez de tumbar el servidor.
