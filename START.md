@@ -9,6 +9,26 @@
 
 ---
 
+## 0. Estado al parar (2 de agosto de 2026)
+
+**Todo lo de abajo está desplegado y probado contra producción.** El árbol de git
+está limpio y subido (`ab7fa76`). No hay nada a medias.
+
+Lo último que se hizo: tributo por banco, historial de tributación, selector de
+área en contabilidad, alta de producto con cantidad, «Cierre diario», avisos al
+almacenero, credenciales desde el panel y copias de seguridad.
+
+**Al retomar, empezar por el punto 3: la segunda entrega.** Las tablas de esos
+once puntos YA existen; falta la ruta y la pantalla de cada uno.
+
+Aviso de entorno: la base de pruebas usa el **puerto 5433**. El proyecto TREBOL
+(`D:\TREBOL`) usaba ese mismo puerto y se movió al **5434** el 2 de agosto, así
+que ya no chocan y las dos pueden estar levantadas a la vez. El contenedor de
+pruebas se llama `gestion-db-test` (se recreó ese día porque el anterior tenía el
+mapeo de puerto corrupto y no llegaba a arrancar).
+
+---
+
 ## 1. Dónde está todo
 
 | Qué | Dónde |
