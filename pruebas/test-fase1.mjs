@@ -100,8 +100,13 @@ seccion('§1 Gastos: borrado y categorías');
   const arr = cats.datos?.categorias || cats.datos || [];
   ok('hay categorías', Array.isArray(arr) && arr.length >= 10, `n=${Array.isArray(arr) ? arr.length : '?'}`);
 
+  // Contra una base limpia esto crea la categoría (200). Contra producción,
+  // donde una tanda anterior ya la creó, la API responde 400 "ya existe":
+  // también es una respuesta correcta, así que la prueba la acepta en vez
+  // de exigir una base virgen que en producción no va a existir nunca.
   const nueva = await api('POST', '/costos/categorias', { clave: 'agua', etiqueta: 'Agua', deducible: 1 });
-  ok('crear categoría nueva', [200, 409].includes(nueva.estado), JSON.stringify(nueva.datos));
+  const yaExistia = nueva.estado === 400 && /ya existe/i.test(nueva.datos?.error || '');
+  ok('crear categoría nueva', [200, 409].includes(nueva.estado) || yaExistia, JSON.stringify(nueva.datos));
 
   const noBorrable = await api('DELETE', '/costos/categorias/nomina');
   ok('la categoría "nomina" NO se puede borrar', noBorrable.estado >= 400, `estado=${noBorrable.estado}`);

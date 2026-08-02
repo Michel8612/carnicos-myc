@@ -5,7 +5,7 @@
 > `MEMORIA-DEL-PROYECTO.md`, pero **ese archivo es del 29 de julio y no incluye las dos
 > últimas entregas**. Si los dos se contradicen, manda este.
 >
-> Última actualización: **30 de julio de 2026**
+> Última actualización: **2 de agosto de 2026**
 
 ---
 
@@ -49,26 +49,47 @@ Todo lo de abajo está **desplegado y probado contra producción** (45/45).
 
 ---
 
-## 3. Qué falta — Sección 10 del documento
-
-Cuatro puntos de esa sección ya quedaron cubiertos (configuración de impuestos, de monedas,
-de permisos, y registro de actividad por usuario). Faltan **doce**:
-
-**Orden recomendado:**
-
-1. **Copias de seguridad y restauración** ← *empezar por aquí*
-   Es el único punto cuyo fallo no tiene arreglo. Todo el negocio del cliente vive en una
-   sola base de datos de Neon.
-2. **Reportes exportables (PDF y Excel)**
-   Sin esto no se puede presentar nada a la ONAT ni al banco.
-3. **Estado de resultados · Balance general · Flujo de caja**
-   Los tres informes que dicen si el negocio gana dinero.
-4. **Cuentas por cobrar · Cuentas por pagar**
-5. **Presupuestos · Conciliación de inventario**
-6. **Dashboard de indicadores · Centro de notificaciones**
-   Los últimos: se ven bien, pero hoy no resuelven ningún problema real.
+**Entrega del 2 de agosto**
+- **El tributo cambió de base.** Ya NO lo afectan las ventas, el almacén ni las recetas.
+  Ahora se calcula con las **entradas de dinero en el banco** más los **gastos**.
+  Cada cálculo queda en un historial que **solo el administrador puede borrar**.
+- **Contabilidad**: selector para ver el punto de venta, un almacén concreto o la cocina,
+  y borrado con la ✕ roja donde faltaba.
+- **Almacén**: un producto se puede dar de alta ya con su cantidad inicial. La entrada
+  queda en el historial como cualquier otra. El flujo de entradas y salidas no se tocó.
+- **Ventas**: «Reiniciar jornada» ahora se llama **«Cierre diario»**, y los cierres se ven
+  en un historial.
+- **Avisos**: cuando el cocinero produce una receta, al almacenero le llega una notificación
+  para darle entrada. Campanita arriba a la derecha en las pantallas principales.
+- **Conexiones externas** (`credenciales.html`): el token de elTOQUE, Transfermóvil y lo que
+  venga se ponen **desde el panel**, sin tocar código ni volver a desplegar. Lo guardado
+  manda sobre la variable de entorno. El valor nunca vuelve al navegador.
+- **Copias de seguridad** (`respaldos.html`): descarga de toda la base en JSON y restauración
+  con confirmación escrita a mano. La auditoría nunca se sobrescribe.
 
 ---
+
+## 3. Qué falta — Sección 10 del documento
+
+De los doce puntos que quedaban, **copias de seguridad ya está hecho** (era el único cuyo
+fallo no tenía arreglo). Quedan **once**, agrupados en una segunda entrega:
+
+1. **Reportes exportables (PDF y Excel)** ← *empezar por aquí*
+   Sin esto no se puede presentar nada a la ONAT ni al banco.
+   Ya está escrita la librería `backend/src/servicios/exportar.js` (CSV y Excel reales con
+   exceljs); el PDF se resuelve con vista de impresión, no con un motor en el servidor.
+2. **Estado de resultados · Balance general · Flujo de caja**
+3. **Cuentas por cobrar · Cuentas por pagar**
+4. **Presupuestos · Conciliación de inventario**
+5. **Dashboard de indicadores · Centro de notificaciones**
+   El centro de avisos ya tiene backend (`routes/notificaciones.js`) y campanita; falta la
+   pantalla completa.
+
+**Las tablas de los once puntos YA ESTÁN CREADAS** en `schema.sql` (`cuentas_terceros`,
+`cuentas_pagos`, `presupuestos`, `presupuesto_lineas`, `conciliaciones`,
+`conciliacion_lineas`, `notificaciones`). Falta el código de las rutas y las pantallas.
+Sus montajes en `server.js` están comentados en el bloque «Sección 10 del ERP»:
+al crear cada archivo de ruta, se descomenta el suyo.
 
 ## 4. Gestiones que dependen del cliente (aquí no se puede avanzar solo)
 
