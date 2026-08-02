@@ -336,9 +336,18 @@ router.delete('/producto/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
-// ---------- Reiniciar jornada ----------
+// ---------- Cierre diario ----------
+// En pantalla el botón se llama "Cierre diario" (antes "Reiniciar
+// jornada": mismo botón, nombre más claro). El endpoint SIGUE
+// llamándose /reiniciar a propósito: cambiarlo rompería a quien ya lo
+// esté llamando y no aporta nada.
+//
 // Descuenta lo vendido de la existencia, anota cada venta en el libro
 // de contabilidad (queda con fecha y hora) y pone el vendido en cero.
+// Al final deja además UNA línea-resumen del cierre (tipo
+// 'cierre_ventas', ver más abajo): es lo que lee GET /cierres para
+// pintar "Cierres anteriores" en pantalla, sin tener que adivinar qué
+// líneas del libro pertenecen a cuál cierre.
 router.post('/reiniciar', async (req, res) => {
   const usuarioId = duenoDeLaHoja(req, req.body);
 
@@ -379,13 +388,64 @@ router.post('/reiniciar', async (req, res) => {
     }
   }
 
+  const totalGanancia = Number((totalDinero - totalCosto).toFixed(2));
+
+  // Línea-resumen del cierre, para "Cierres anteriores". OJO: ingreso y
+  // costo van en CERO a propósito — el ingreso y el costo reales YA
+  // quedaron anotados arriba, línea por línea (una por producto
+  // vendido). Repetirlos aquí los sumaría DOS VECES en los totales de
+  // Contabilidad y en Tributación (que suman ingreso/costo de TODO
+  // contabilidad_registros). El total vendido de este cierre se guarda
+  // en "valor" en cambio, que por convención de esta tabla es solo de
+  // referencia y nunca se suma en esos cálculos — el mismo truco que ya
+  // usan los movimientos de almacén (ver POST /inventario/movimientos).
+  await anotar({
+    tipo: 'cierre_ventas',
+    concepto: 'Cierre diario de ventas',
+    producto: null,
+    cantidad: filas.length,
+    unidad: null,
+    costo: 0,
+    ingreso: 0,
+    valor: totalDinero,
+    area: 'ventas',
+    usuario: req.usuario,
+    nota: `Ganancia: ${totalGanancia.toFixed(2)} · Costo: ${totalCosto.toFixed(2)} · ${filas.length} producto(s) con venta.`,
+  });
+
   res.json({
     ok: true,
     total_dinero: Number(totalDinero.toFixed(2)),
     total_costo: Number(totalCosto.toFixed(2)),
-    total_ganancia: Number((totalDinero - totalCosto).toFixed(2)),
+    total_ganancia: totalGanancia,
     productos: filas.length,
   });
+});
+
+// ---------- Cierres anteriores (historial de "Cierre diario") ----------
+// Lee las líneas-resumen que deja POST /reiniciar (tipo='cierre_ventas',
+// ver el comentario de arriba). Mismo criterio de visibilidad que
+// /historial: cada vendedor ve los suyos; dueño/admin/proveedor los ven
+// todos. Nota: queda registrado con el usuario que EJECUTÓ el cierre
+// (req.usuario), no necesariamente el dueño de la hoja — igual que ya
+// pasa con las líneas de detalle de arriba, para no inventar un criterio
+// distinto dentro del mismo endpoint.
+router.get('/cierres', async (req, res) => {
+  const esJefe = ES_JEFE(req.usuario.rol);
+  const cond = ['tipo = ?'];
+  const params = ['cierre_ventas'];
+  if (!esJefe) {
+    cond.push('usuario_id = ?');
+    params.push(req.usuario.id);
+  }
+  const filas = await db.prepare(`
+    SELECT id, fecha, valor AS total_vendido, usuario_nombre, nota
+    FROM contabilidad_registros
+    WHERE ${cond.join(' AND ')}
+    ORDER BY fecha DESC
+    LIMIT 200
+  `).all(...params);
+  res.json(filas);
 });
 
 // ============================================================

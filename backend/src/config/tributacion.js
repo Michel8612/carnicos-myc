@@ -19,8 +19,21 @@
 //     tiene una lista de "tributos". Cada tributo es un objeto plano:
 //       { clave, nombre, base, porcentaje, minimo_exento, notas }
 //     donde `base` dice sobre qué magnitud del negocio se calcula:
-//       'utilidad_neta'   -> ganancia de ventas del período menos gastos
-//       'ventas_brutas'   -> total de ingresos por ventas del período
+//       'utilidad_neta'   -> ingresos bancarios del período menos gastos
+//       'ventas_brutas'   -> ingresos bancarios del período (entradas de
+//                            dinero en las cuentas de `cuentas_bancarias`,
+//                            ver `calcularTributacion` en
+//                            routes/contabilidad.js). El nombre de la
+//                            clave se conserva tal cual (aunque ya no
+//                            mide "ventas") por compatibilidad con las
+//                            correcciones manuales guardadas y con el
+//                            régimen "Otro" que el usuario ya haya
+//                            configurado: cambiar la clave las hubiera
+//                            invalidado en silencio. Cambio pedido por el
+//                            cliente (2026-08): declara sobre lo que le
+//                            ENTRA por el banco, no sobre lo que mueve el
+//                            almacén; ventas, almacén, recetas y
+//                            producción quedaron fuera del cálculo.
 //       'nomina'          -> gastos del período con categoría de nómina
 //   - El motor de cálculo (ver `calcularTributos` más abajo, y la ruta
 //     GET /contabilidad/tributacion en routes/contabilidad.js) NO conoce
@@ -49,6 +62,8 @@ export const TIPOS_EMPRESA = ['microempresa', 'pequena_empresa', 'mediana_empres
 // Bases que el motor de cálculo entiende (ver `calcularTributosConRegimen`
 // más abajo). El régimen "Otro" (definido a mano por el usuario) solo
 // puede usar estas: así el motor genérico sigue sin cambios.
+// Nota: 'ventas_brutas' ya NO se llena con ventas — se llena con los
+// ingresos bancarios del período (ver comentario grande más arriba).
 export const BASES_VALIDAS = ['utilidad_neta', 'ventas_brutas', 'nomina'];
 
 // Clave en `parametros` donde se guarda la definición completa del
@@ -74,7 +89,8 @@ function tributosBase() {
       base: 'utilidad_neta',
       porcentaje: 35,
       minimo_exento: 0,
-      notas: 'Se aplica sobre la utilidad neta del período (ganancia de ventas menos gastos deducibles). Tipo general de referencia ~35%.',
+      notas: 'Se aplica sobre la utilidad neta del período (ingresos bancarios del período menos gastos ' +
+        'deducibles; ya NO es ganancia de ventas menos gastos). Tipo general de referencia ~35%.',
     },
     {
       clave: 'seguridad_social',
@@ -90,7 +106,8 @@ function tributosBase() {
       base: 'ventas_brutas',
       porcentaje: 10,
       minimo_exento: 0,
-      notas: 'Se aplica sobre el total de ventas brutas del período (antes de descontar costos ni gastos).',
+      notas: 'Se aplica sobre los ingresos bancarios del período (entradas de dinero en las cuentas ' +
+        'bancarias, antes de descontar gastos). Ya NO se calcula sobre las ventas ni el movimiento de almacén.',
     },
     {
       clave: 'territorial',
@@ -98,7 +115,7 @@ function tributosBase() {
       base: 'ventas_brutas',
       porcentaje: 1,
       minimo_exento: 0,
-      notas: 'Contribución local de referencia ~1% sobre los ingresos brutos.',
+      notas: 'Contribución local de referencia ~1% sobre los ingresos bancarios del período (entradas de dinero en las cuentas bancarias).',
     },
     // Para añadir un tributo nuevo: agregar aquí un objeto más con la
     // misma forma. El motor lo recoge automáticamente.

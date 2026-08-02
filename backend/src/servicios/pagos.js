@@ -22,6 +22,8 @@
 //     nueva es escribir un objeto más en PASARELAS y nada más.
 // ============================================================
 
+import { obtenerCredencial } from '../routes/credenciales.js';
+
 const TIMEOUT_MS = 8000; // conexión mala en Cuba: que nunca cuelgue la app
 
 // ------------------------------------------------------------
@@ -40,8 +42,17 @@ function baseUrlEnzona() {
   return esSandboxEnzona() ? 'https://apisandbox.enzona.net' : 'https://api.enzona.net';
 }
 
-function credencialesEnzona() {
-  return { clientId: process.env.ENZONA_CLIENT_ID, clientSecret: process.env.ENZONA_CLIENT_SECRET };
+// El Client ID/Secret salen de obtenerCredencial(): 1º lo que el
+// dueño puso en el panel (Empresa → Credenciales), 2º las variables
+// de entorno ENZONA_CLIENT_ID / ENZONA_CLIENT_SECRET del despliegue.
+// Por eso pasó a ser async (consulta la base en cada llamada, sin
+// caché: ver la nota "OJO SERVERLESS" en routes/credenciales.js).
+async function credencialesEnzona() {
+  const [clientId, clientSecret] = await Promise.all([
+    obtenerCredencial('ENZONA_CLIENT_ID'),
+    obtenerCredencial('ENZONA_CLIENT_SECRET'),
+  ]);
+  return { clientId, clientSecret };
 }
 
 // Cache del token OAuth2 en memoria del proceso (no en base de datos:
@@ -50,7 +61,7 @@ let tokenEnzona = null; // { valor, expiraEn(ms) }
 
 async function obtenerTokenEnzona() {
   if (tokenEnzona && Date.now() < tokenEnzona.expiraEn) return tokenEnzona.valor;
-  const { clientId, clientSecret } = credencialesEnzona();
+  const { clientId, clientSecret } = await credencialesEnzona();
   const controlador = new AbortController();
   const temporizador = setTimeout(() => controlador.abort(), TIMEOUT_MS);
   try {
@@ -137,11 +148,11 @@ const PASARELAS = {
     entorno: () => (esSandboxEnzona() ? 'sandbox' : 'producción'),
     variablesRequeridas: ['ENZONA_CLIENT_ID', 'ENZONA_CLIENT_SECRET', 'ENZONA_SANDBOX (opcional: "true" para pruebas)'],
     // Sin credenciales no tiene sentido ni intentar la llamada.
-    disponible() {
-      const { clientId, clientSecret } = credencialesEnzona();
+    async disponible() {
+      const { clientId, clientSecret } = await credencialesEnzona();
       return Boolean(clientId && clientSecret);
     },
-    motivoNoDisponible: 'Faltan las credenciales de comercio (ENZONA_CLIENT_ID / ENZONA_CLIENT_SECRET). El negocio se registra en https://bulevar.enzona.net/ y las credenciales se obtienen en https://api.enzona.net/store/.',
+    motivoNoDisponible: 'Faltan las credenciales de comercio (ENZONA_CLIENT_ID / ENZONA_CLIENT_SECRET). Se ponen desde el panel, en Empresa → Credenciales (o, si se prefiere, como variable de entorno). El negocio se registra en https://bulevar.enzona.net/ y las credenciales se obtienen en https://api.enzona.net/store/.',
 
     // Crea un cobro (genera QR de cobro del lado de EnZona). El payload
     // exacto no se ha podido confirmar sin credenciales reales: se sigue
@@ -149,7 +160,7 @@ const PASARELAS = {
     // respuesta está aislado en mapearRespuestaEnzona() por si hay que
     // corregirlo el día que se pruebe con credenciales de verdad.
     async crearCobro({ monto, concepto, referencia } = {}) {
-      if (!this.disponible()) return { ok: false, motivo: this.motivoNoDisponible };
+      if (!(await this.disponible())) return { ok: false, motivo: this.motivoNoDisponible };
       try {
         const datos = await llamarEnzona('/payment/rest/v3/generateqr', {
           method: 'POST',
@@ -162,7 +173,7 @@ const PASARELAS = {
     },
 
     async consultarEstado(idTransaccion) {
-      if (!this.disponible()) return { ok: false, motivo: this.motivoNoDisponible };
+      if (!(await this.disponible())) return { ok: false, motivo: this.motivoNoDisponible };
       try {
         const datos = await llamarEnzona(`/payment/rest/v3/transaction/${encodeURIComponent(idTransaccion)}`);
         return { ok: true, estado: mapearRespuestaEnzona(datos) };
@@ -172,7 +183,7 @@ const PASARELAS = {
     },
 
     async listarMovimientos({ desde, hasta } = {}) {
-      if (!this.disponible()) return { ok: false, motivo: this.motivoNoDisponible };
+      if (!(await this.disponible())) return { ok: false, motivo: this.motivoNoDisponible };
       try {
         const qs = new URLSearchParams();
         if (desde) qs.set('from', desde);
@@ -196,6 +207,13 @@ const PASARELAS = {
   //  usar métodos no documentados, así que este adaptador queda con
   //  la misma interfaz pero siempre inerte, hasta que haya un
   //  contrato y documentación real que implementar.
+  //
+  //  El panel de Credenciales ya admite guardar TRANSFERMOVIL_USUARIO
+  //  / TRANSFERMOVIL_CLAVE / TRANSFERMOVIL_TELEFONO (para tenerlos a
+  //  mano el día que exista contrato), pero ESTE adaptador no los lee
+  //  a propósito: disponible() se queda fijo en false, sin importar
+  //  si esas credenciales están puestas o no. Cambiar eso es tarea
+  //  del día que haya contrato y documentación real de ETECSA.
   // ------------------------------------------------------------
   transfermovil: {
     nombre: 'Transfermóvil',
@@ -222,16 +240,24 @@ function pasarela(clave) {
 // ------------------------------------------------------------
 
 // Estado de todas las pasarelas para la pantalla Empresa → Pasarelas
-// de pago. NUNCA hace llamadas de red: solo mira si hay credenciales.
+// de pago. NUNCA hace llamadas de red a la pasarela: solo mira si hay
+// credenciales (ahora en la base de datos y/o el entorno — de ahí que
+// disponible() sea async y aquí se recorra con un bucle en vez de
+// .map(), para poder hacer await de cada una).
 export async function estadoPasarelas() {
-  return Object.entries(PASARELAS).map(([clave, p]) => ({
-    clave,
-    nombre: p.nombre,
-    disponible: p.disponible(),
-    entorno: p.entorno(),
-    variables_requeridas: p.variablesRequeridas,
-    motivo: p.disponible() ? null : p.motivoNoDisponible,
-  }));
+  const resultados = [];
+  for (const [clave, p] of Object.entries(PASARELAS)) {
+    const disponible = await p.disponible();
+    resultados.push({
+      clave,
+      nombre: p.nombre,
+      disponible,
+      entorno: p.entorno(),
+      variables_requeridas: p.variablesRequeridas,
+      motivo: disponible ? null : p.motivoNoDisponible,
+    });
+  }
+  return resultados;
 }
 
 export async function crearCobro(clave, datos) { return pasarela(clave).crearCobro(datos); }

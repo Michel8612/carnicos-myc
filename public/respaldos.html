@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Copias de seguridad - Cárnicos M&C</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    /* Mismo patrón visual que empresa.html / auditoria.html. */
+    body.resp-body { margin:0; font-family:Arial, Helvetica, sans-serif; background:linear-gradient(to bottom,#f5f5f5,#e0f7fa); color:#000; }
+    header { text-align:center; padding:18px 20px 20px; background:#37474f; color:#fff; box-shadow:0 2px 6px rgba(0,0,0,.25); }
+    .logo-resp { width:76px; height:76px; object-fit:contain; display:block; margin:0 auto 8px; background:#fff; border-radius:50%; padding:6px; box-shadow:0 2px 8px rgba(0,0,0,.3); }
+    header h1 { color:#fff; font-size:24px; letter-spacing:.5px; text-shadow:0 1px 3px rgba(0,0,0,.4); margin:8px 0; }
+
+    .resp-wrap { max-width:1000px; margin:0 auto; padding:0 12px 40px; }
+
+    h3.seccion { margin:22px 0 6px; color:#283593; font-size:17px; }
+    p.sub { margin:0 0 10px; font-size:12.5px; color:#777; }
+
+    .tarjeta { background:#fff; border-radius:12px; padding:16px; box-shadow:0 3px 10px rgba(0,0,0,.12); margin-bottom:16px; }
+
+    .btn { padding:10px 18px; border:none; border-radius:8px; cursor:pointer; font-size:14px; font-weight:bold; }
+    .btn:disabled { opacity:.5; cursor:not-allowed; }
+    .btn-azul { background:#1976D2; color:#fff; } .btn-azul:hover:not(:disabled) { background:#1565C0; }
+    .btn-grande { padding:16px 24px; font-size:16px; width:100%; }
+    .btn-rojo { background:#c62828; color:#fff; } .btn-rojo:hover:not(:disabled) { background:#8d1a1a; }
+    .acciones { margin-top:14px; display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+
+    .aviso { background:#fff8e1; border:1px solid #ffca28; color:#7a5c00; border-radius:8px; padding:10px 14px; font-size:12.5px; margin:14px 0; }
+    .aviso b { color:#5d4400; }
+
+    /* Zona de restauración: separada y en rojo a propósito, es irreversible. */
+    .zona-peligro { border:2px solid #c62828; background:#fff5f5; border-radius:12px; padding:16px; margin-bottom:16px; }
+    .zona-peligro h3 { color:#c62828; margin-top:0; }
+    .aviso-bloqueo { background:#ffebee; border:1px solid #ef9a9a; color:#8d1a1a; border-radius:8px; padding:10px 14px; font-size:13px; margin:10px 0; }
+    .aviso-bloqueo b { color:#7f0000; }
+
+    .campo-restaurar { margin:12px 0; }
+    .campo-restaurar label { display:block; font-size:12.5px; color:#555; margin-bottom:4px; font-weight:bold; }
+    .campo-restaurar input[type="text"] { width:100%; box-sizing:border-box; padding:10px; border:1px solid #ef9a9a; border-radius:8px; font-size:14px; }
+    .campo-restaurar input[type="file"] { width:100%; box-sizing:border-box; }
+
+    .estado-linea { font-size:13px; color:#37474f; margin-top:8px; }
+
+    .tabla-scroll { overflow-x:auto; margin-top:10px; }
+    table.datos { width:100%; border-collapse:collapse; background:#fff; border-radius:10px; overflow:hidden; box-shadow:0 3px 10px rgba(0,0,0,.1); min-width:700px; }
+    table.datos th { background:#c5cae9; padding:10px 8px; font-size:12.5px; text-align:center; }
+    table.datos td { border-top:1px solid #eceff1; padding:8px; font-size:13.5px; text-align:center; }
+    table.datos td.izq, table.datos th.izq { text-align:left; }
+    .vacio { text-align:center; color:#777; padding:24px; }
+    .etq { padding:3px 8px; border-radius:10px; font-size:11px; font-weight:bold; display:inline-block; }
+    .e-activa { background:#e8f5e9; color:#2e7d32; } .e-anulado { background:#ffebee; color:#c62828; }
+  </style>
+</head>
+
+<body class="resp-body">
+  <header>
+    <img src="img/logo.png" alt="Cárnicos M&C" class="logo-resp logo-circulo">
+    <h1>Copias de seguridad</h1>
+    <div class="top-nav">
+      <a href="#" id="navPanel" style="display:none;">← Panel</a>
+      <a href="#" onclick="logout();return false;">Salir</a>
+    </div>
+  </header>
+
+  <main class="resp-wrap">
+    <p class="sub" style="text-align:center;margin-top:14px;">
+      Copia y restauración completa de la base de datos. Solo dueño/admin/soporte tienen acceso a esta pantalla.
+    </p>
+
+    <!-- DESCARGA -->
+    <h3 class="seccion">Descargar copia de seguridad</h3>
+    <div class="tarjeta">
+      <p class="sub">
+        Genera y descarga ahora mismo un archivo JSON con TODAS las tablas del sistema
+        (productos, ventas, usuarios, cuentas bancarias, etc.). Guárdelo en un lugar seguro,
+        fuera de este equipo.
+      </p>
+      <div class="acciones">
+        <button class="btn btn-azul btn-grande" id="btnDescargar">Descargar copia de seguridad</button>
+      </div>
+      <div class="estado-linea" id="estadoDescarga"></div>
+    </div>
+
+    <!-- RESTAURACIÓN -->
+    <h3 class="seccion">Restaurar</h3>
+    <div class="zona-peligro">
+      <h3>Zona de restauración</h3>
+      <div class="aviso-bloqueo">
+        <b>Cuidado:</b> restaurar un respaldo <b>borra y reemplaza todos los datos actuales</b>
+        (productos, ventas, usuarios, cuentas, movimientos...) por los que traiga el archivo.
+        No se puede deshacer. La única excepción es el registro de auditoría, que nunca se toca.
+      </div>
+
+      <div class="campo-restaurar">
+        <label>Archivo de respaldo (.json)</label>
+        <input type="file" id="archRestaurar" accept="application/json,.json">
+      </div>
+      <div class="campo-restaurar">
+        <label>Escriba RESTAURAR (en mayúsculas) para habilitar el botón</label>
+        <input type="text" id="confRestaurar" placeholder="RESTAURAR" autocomplete="off">
+      </div>
+
+      <div class="acciones">
+        <button class="btn btn-rojo" id="btnRestaurar" disabled>Restaurar respaldo</button>
+      </div>
+      <div class="estado-linea" id="estadoRestaurar"></div>
+    </div>
+
+    <!-- HISTORIAL -->
+    <h3 class="seccion">Historial de copias y restauraciones</h3>
+    <div class="tabla-scroll">
+      <table class="datos">
+        <thead>
+          <tr>
+            <th>Fecha y hora</th><th>Tipo</th><th class="izq">Usuario</th>
+            <th>Tablas</th><th>Filas</th><th>Resultado</th><th class="izq">Detalle</th>
+          </tr>
+        </thead>
+        <tbody id="tbHistorial"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/sonidos.js"></script>
+  <script src="js/respaldos.js"></script>
+</body>
+</html>

@@ -730,6 +730,170 @@ CREATE TABLE IF NOT EXISTS autorizaciones_usadas (
   accion TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_autz_usada_en ON autorizaciones_usadas(usada_en);
+
+-- ============================================================
+--  SECCIÓN 10 DEL ERP — tablas nuevas
+--  Se declaran TODAS aquí, de una vez, para que cada área pueda
+--  desarrollarse por separado sin tocar este archivo y sin que dos
+--  cambios simultáneos se pisen.
+-- ============================================================
+
+-- ---- Copias de seguridad -----------------------------------
+-- No se guarda el contenido del respaldo: en Netlify la función no
+-- tiene disco donde dejarlo. El respaldo se genera y se descarga en
+-- el momento; aquí solo queda constancia de quién lo hizo y qué
+-- contenía, que es lo que permite auditar si hubo copia antes de un
+-- desastre.
+CREATE TABLE IF NOT EXISTS respaldos (
+  id SERIAL PRIMARY KEY,
+  tipo TEXT NOT NULL DEFAULT 'manual',
+  tablas INTEGER,
+  filas INTEGER,
+  tamano_bytes INTEGER,
+  usuario_id INTEGER REFERENCES usuarios(id),
+  usuario_nombre TEXT,
+  resultado TEXT NOT NULL DEFAULT 'ok',
+  detalle TEXT,
+  creado_en TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_respaldos_fecha ON respaldos(creado_en DESC);
+
+-- ---- Cuentas por cobrar y por pagar ------------------------
+-- Una sola tabla con \`tipo\` en lugar de dos: las dos caras son
+-- simétricas (un tercero, un documento, un vencimiento y un saldo) y
+-- duplicar la tabla obligaría a duplicar también cada consulta.
+CREATE TABLE IF NOT EXISTS cuentas_terceros (
+  id SERIAL PRIMARY KEY,
+  tipo TEXT NOT NULL,                       -- 'cobrar' | 'pagar'
+  tercero TEXT NOT NULL,                    -- cliente o proveedor
+  documento TEXT,                           -- factura, vale, contrato
+  concepto TEXT,
+  monto NUMERIC(14,2) NOT NULL,
+  saldo NUMERIC(14,2) NOT NULL,
+  moneda TEXT NOT NULL DEFAULT 'CUP',
+  fecha_emision DATE NOT NULL DEFAULT CURRENT_DATE,
+  fecha_vencimiento DATE,
+  estado TEXT NOT NULL DEFAULT 'pendiente', -- pendiente | parcial | pagada | anulada
+  referencia_tipo TEXT,                     -- 'venta' | 'compra' | null
+  referencia_id INTEGER,
+  nota TEXT,
+  usuario_id INTEGER REFERENCES usuarios(id),
+  creado_en TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_cuentas_tipo_estado ON cuentas_terceros(tipo, estado);
+CREATE INDEX IF NOT EXISTS idx_cuentas_vencimiento ON cuentas_terceros(fecha_vencimiento);
+
+CREATE TABLE IF NOT EXISTS cuentas_pagos (
+  id SERIAL PRIMARY KEY,
+  cuenta_id INTEGER NOT NULL REFERENCES cuentas_terceros(id) ON DELETE CASCADE,
+  monto NUMERIC(14,2) NOT NULL,
+  fecha DATE NOT NULL DEFAULT CURRENT_DATE,
+  metodo TEXT,                              -- efectivo, transferencia, enzona...
+  referencia TEXT,
+  nota TEXT,
+  usuario_id INTEGER REFERENCES usuarios(id),
+  creado_en TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_cuentas_pagos_cuenta ON cuentas_pagos(cuenta_id);
+
+-- ---- Presupuestos ------------------------------------------
+CREATE TABLE IF NOT EXISTS presupuestos (
+  id SERIAL PRIMARY KEY,
+  nombre TEXT NOT NULL,
+  periodo_inicio DATE NOT NULL,
+  periodo_fin DATE NOT NULL,
+  nota TEXT,
+  usuario_id INTEGER REFERENCES usuarios(id),
+  creado_en TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS presupuesto_lineas (
+  id SERIAL PRIMARY KEY,
+  presupuesto_id INTEGER NOT NULL REFERENCES presupuestos(id) ON DELETE CASCADE,
+  tipo TEXT NOT NULL,                       -- 'ingreso' | 'gasto'
+  categoria TEXT NOT NULL,                  -- coincide con categorias_gasto cuando es gasto
+  previsto NUMERIC(14,2) NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_presupuesto_lineas ON presupuesto_lineas(presupuesto_id);
+
+-- ---- Conciliación de inventario ----------------------------
+-- El conteo físico se guarda ANTES de tocar las existencias: primero
+-- se anota lo que hay de verdad, y solo al cerrar la conciliación se
+-- ajusta el sistema. Así queda constancia de la diferencia, que es
+-- justo lo que interesa investigar.
+CREATE TABLE IF NOT EXISTS conciliaciones (
+  id SERIAL PRIMARY KEY,
+  almacen_id INTEGER REFERENCES almacenes(id),
+  estado TEXT NOT NULL DEFAULT 'abierta',   -- abierta | cerrada | anulada
+  nota TEXT,
+  usuario_id INTEGER REFERENCES usuarios(id),
+  creado_en TIMESTAMPTZ DEFAULT NOW(),
+  cerrada_en TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_conciliaciones_estado ON conciliaciones(estado, almacen_id);
+
+CREATE TABLE IF NOT EXISTS conciliacion_lineas (
+  id SERIAL PRIMARY KEY,
+  conciliacion_id INTEGER NOT NULL REFERENCES conciliaciones(id) ON DELETE CASCADE,
+  producto_id INTEGER NOT NULL REFERENCES productos(id),
+  existencia_sistema NUMERIC(14,3) NOT NULL DEFAULT 0,
+  existencia_fisica NUMERIC(14,3),
+  diferencia NUMERIC(14,3),
+  motivo TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_concil_lineas ON conciliacion_lineas(conciliacion_id);
+
+-- ---- Centro de notificaciones ------------------------------
+-- Se guarda en la base y no solo en pantalla: un aviso de stock bajo
+-- que solo existe mientras la página está abierta no sirve de nada
+-- para quien entra por la mañana.
+CREATE TABLE IF NOT EXISTS notificaciones (
+  id SERIAL PRIMARY KEY,
+  tipo TEXT NOT NULL,                       -- stock_bajo, vencimiento, cierre...
+  titulo TEXT NOT NULL,
+  mensaje TEXT,
+  severidad TEXT NOT NULL DEFAULT 'info',   -- info | aviso | urgente
+  destino_rol TEXT,                         -- null = todos
+  referencia_tipo TEXT,
+  referencia_id INTEGER,
+  leida_por TEXT NOT NULL DEFAULT '',       -- ids de usuario separados por coma
+  creada_en TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_notif_fecha ON notificaciones(creada_en DESC);
+
+-- ---- Historial de cálculos de tributación ------------------
+-- Cada vez que se calcula el tributo de un periodo se guarda aquí lo
+-- que se obtuvo y con qué cifras. Sin este historial no hay forma de
+-- explicarle a la ONAT por qué en marzo se declaró una cantidad y en
+-- abril otra. Solo el administrador puede borrar líneas: quien calcula
+-- no puede hacer desaparecer un cálculo que no le gustó.
+CREATE TABLE IF NOT EXISTS tributacion_historial (
+  id SERIAL PRIMARY KEY,
+  periodo TEXT NOT NULL,                    -- 'YYYY-MM' o rango
+  base_ingresos NUMERIC(14,2) NOT NULL DEFAULT 0,
+  base_gastos NUMERIC(14,2) NOT NULL DEFAULT 0,
+  base_imponible NUMERIC(14,2) NOT NULL DEFAULT 0,
+  tributo NUMERIC(14,2) NOT NULL DEFAULT 0,
+  detalle TEXT,                             -- JSON con las partidas
+  usuario_id INTEGER REFERENCES usuarios(id),
+  usuario_nombre TEXT,
+  creado_en TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_tributacion_hist ON tributacion_historial(periodo, creado_en DESC);
+
+-- ---- Credenciales de servicios externos --------------------
+-- Token de elTOQUE, datos de Transfermóvil, EnZona... Se guardan en la
+-- base y no en variables de entorno para que el dueño pueda ponerlos
+-- desde el panel sin tocar código ni volver a desplegar. El valor
+-- nunca se devuelve entero al navegador: solo si está puesto y sus
+-- últimos caracteres, lo justo para reconocerlo.
+CREATE TABLE IF NOT EXISTS credenciales (
+  clave TEXT PRIMARY KEY,
+  valor TEXT,
+  descripcion TEXT,
+  actualizado_en TIMESTAMPTZ DEFAULT NOW(),
+  actualizado_por INTEGER REFERENCES usuarios(id)
+);
 `;
 
 export default SCHEMA_SQL;

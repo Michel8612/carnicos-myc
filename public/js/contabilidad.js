@@ -33,6 +33,63 @@ if (esDueno()) {
   nav.style.display = ''; nav.href = 'admin.html';
 }
 
+// ---------- Selector de área (punto de venta / almacén concreto / cocina) ----------
+// Pedido del cliente: poder elegir qué área se está viendo. Afecta a los
+// listados donde tiene sentido (Almacén del resumen y Movimientos de
+// almacén); Ventas ya ES el punto de venta, así que no se filtra aparte.
+// Se usa apiFetch directamente (como ya se hace en este archivo para
+// /costos/categorias y otras rutas sin método propio en API.*) para poder
+// mandar la query string con origen/almacen_id sin tocar public/js/api.js.
+function origenQueryString() {
+  const origen = document.getElementById('selOrigen').value;
+  const almacenId = document.getElementById('selAlmacenId').value;
+  const params = new URLSearchParams();
+  if (origen) params.set('origen', origen);
+  if (origen === 'almacen' && almacenId) params.set('almacen_id', almacenId);
+  const qs = params.toString();
+  return qs ? `?${qs}` : '';
+}
+
+// Llena el <select> de almacenes una sola vez, con los almacenes vistos en
+// la primera carga SIN filtrar (para que aparezcan todos, no solo los del
+// filtro actual).
+function poblarSelectorAlmacenes(filasAlmacen) {
+  const sel = document.getElementById('selAlmacenId');
+  if (sel.dataset.poblado) return;
+  const vistos = new Map();
+  filasAlmacen.forEach((f) => { if (f.almacen_id && !vistos.has(f.almacen_id)) vistos.set(f.almacen_id, f.almacen); });
+  if (!vistos.size) return; // todavía no hay datos: se intenta de nuevo en la próxima carga
+  sel.innerHTML = [...vistos.entries()].map(([id, nombre]) => `<option value="${id}">${esc(nombre)}</option>`).join('');
+  sel.dataset.poblado = '1';
+}
+
+function mensajeSinDatosAlmacen() {
+  const origen = document.getElementById('selOrigen').value;
+  if (origen === 'venta') return 'El punto de venta no tiene existencias de almacén propias: véalas en la pestaña "Ventas".';
+  if (origen === 'cocina') return 'No hay existencias en ningún almacén llamado "Cocina".';
+  if (origen === 'almacen') return 'No hay existencias para el almacén seleccionado.';
+  return 'No hay existencias en el almacén.';
+}
+
+function mensajeSinDatosMovs() {
+  const origen = document.getElementById('selOrigen').value;
+  if (origen === 'venta') return 'El punto de venta no genera movimientos de almacén.';
+  if (origen === 'cocina') return 'No hay movimientos en ningún almacén llamado "Cocina".';
+  if (origen === 'almacen') return 'No hay movimientos para el almacén seleccionado.';
+  return 'Todavía no hay movimientos de almacén.';
+}
+
+document.getElementById('selOrigen').addEventListener('change', () => {
+  const esAlmacen = document.getElementById('selOrigen').value === 'almacen';
+  document.getElementById('wrapAlmacenId').classList.toggle('oculto', !esAlmacen);
+  cargarResumen();
+  if (document.getElementById('pMovs').classList.contains('activo')) cargarMovimientos();
+});
+document.getElementById('selAlmacenId').addEventListener('change', () => {
+  cargarResumen();
+  if (document.getElementById('pMovs').classList.contains('activo')) cargarMovimientos();
+});
+
 // ---------- Pestañas ----------
 document.querySelectorAll('.tabs button').forEach((b) => {
   b.addEventListener('click', () => {
@@ -51,8 +108,12 @@ document.querySelectorAll('.tabs button').forEach((b) => {
 // ---------- Resumen: almacén + ventas + totales ----------
 async function cargarResumen() {
   let d;
-  try { d = await API.contabResumen(); }
+  try { d = await apiFetch(`/contabilidad/resumen${origenQueryString()}`); }
   catch (e) { alert('No se pudo cargar: ' + e.message); return; }
+
+  // La primera carga (sin filtro de área todavía elegido) sirve para
+  // llenar el selector de almacenes con todos los que existan.
+  if (!document.getElementById('selOrigen').value) poblarSelectorAlmacenes(d.almacen.filas);
 
   // Tarjetas generales
   document.getElementById('kIngreso').textContent = money(d.historico.ingreso);
@@ -83,7 +144,7 @@ async function cargarResumen() {
         <td>${f.precio_venta > 0 ? money(f.valor_venta) : '—'}</td>
         <td>${f.ganancia_potencial === null ? '<span style="color:#999">no se vende</span>' : gan(f.ganancia_potencial)}</td>
       </tr>`).join('')
-    : '<tr><td colspan="10" class="vacio">No hay existencias en el almacén.</td></tr>';
+    : `<tr><td colspan="10" class="vacio">${esc(mensajeSinDatosAlmacen())}</td></tr>`;
 
   // --- Ventas ---
   document.getElementById('vIngreso').textContent = money(d.ventas.ingreso_jornada);
@@ -135,7 +196,7 @@ async function cargarLibro() {
         <td>${money(f.ingreso)}</td>
         <td>${esInformativo(f) ? '<span style="color:#999">—</span>' : gan(f.ganancia)}</td>
         <td>${esc(f.usuario_nombre || '')}</td>
-        <td><button class="btn-x" data-id="${f.id}">Eliminar</button></td>
+        <td><button class="btn-x" data-id="${f.id}" title="Eliminar apunte del libro">✕</button></td>
       </tr>`).join('')
     : '<tr><td colspan="9" class="vacio">No hay apuntes con ese filtro.</td></tr>';
 
@@ -212,7 +273,7 @@ document.getElementById('btnBorrarLote').addEventListener('click', async () => {
 // ---------- Movimientos del almacén ----------
 async function cargarMovimientos() {
   let filas;
-  try { filas = await API.contabMovimientos(); }
+  try { filas = await apiFetch(`/contabilidad/movimientos${origenQueryString()}`); }
   catch (e) { alert('No se pudieron cargar los movimientos: ' + e.message); return; }
 
   document.getElementById('tbMovs').innerHTML = filas.length
@@ -228,7 +289,7 @@ async function cargarMovimientos() {
         <td>${esc(m.almacen || '')}</td>
         <td>${esc(m.usuario || '')}</td>
       </tr>`).join('')
-    : '<tr><td colspan="9" class="vacio">Todavía no hay movimientos de almacén.</td></tr>';
+    : `<tr><td colspan="9" class="vacio">${esc(mensajeSinDatosMovs())}</td></tr>`;
 }
 
 document.getElementById('btnActualizar').addEventListener('click', (e) => {
@@ -326,7 +387,7 @@ async function cargarCategoriasAdmin() {
         <td class="izq">${esc(c.etiqueta)}</td>
         <td>${c.deducible ? 'Sí' : 'No'}</td>
         <td>${c.fija ? 'De fábrica' : (c.activa ? 'Activa' : 'Desactivada')}</td>
-        <td>${c.fija ? '' : (c.activa ? `<button class="btn-x" data-clave="${esc(c.clave)}">Borrar</button>` : '')}</td>
+        <td>${c.fija ? '' : (c.activa ? `<button class="btn-x" data-clave="${esc(c.clave)}" title="Borrar categoría">✕</button>` : '')}</td>
       </tr>`).join('')
     : '<tr><td colspan="5" class="vacio">No hay categorías.</td></tr>';
 
@@ -485,9 +546,12 @@ document.getElementById('tTipoEmpresa').addEventListener('change', async () => {
 
 document.getElementById('btnCalcularTributacion').addEventListener('click', cargarTributacion);
 
+// "ventas_brutas" es el nombre interno histórico de la clave (se conserva
+// por las correcciones ya guardadas y el régimen "Otro"), pero desde el
+// cambio de base ya no mide ventas: mide ingresos bancarios (ver backend).
 const nombreBase = (b) => ({
   utilidad_neta: 'Utilidad neta',
-  ventas_brutas: 'Ventas brutas',
+  ventas_brutas: 'Ingresos bancarios',
   nomina: 'Nómina',
 }[b] || b);
 
@@ -672,13 +736,81 @@ async function cargarTributacion() {
       <tr><td class="izq">${esc(g.categoria)}</td><td>${money(g.total)}</td></tr>`).join('')
     : '<tr><td colspan="2" class="vacio">No hay gastos registrados en este período.</td></tr>';
 
+  // Ingresos por cuenta bancaria (desglose informativo del nuevo total de
+  // ingresos: ver comentario grande en routes/contabilidad.js).
+  const tbI = document.getElementById('tbIngresosCuenta');
+  if (tbI) {
+    tbI.innerHTML = (d.ingresos_por_cuenta || []).length
+      ? d.ingresos_por_cuenta.map((c) => `
+        <tr><td class="izq">${esc(c.cuenta)}</td><td>${money(c.total)}</td></tr>`).join('')
+      : '<tr><td colspan="2" class="vacio">No hay entradas bancarias registradas en este período.</td></tr>';
+  }
+
   const ul = document.getElementById('tribAdvertencias');
   ul.innerHTML = d.advertencias.length
     ? d.advertencias.map((a) => `<li>${esc(a)}</li>`).join('')
     : '<li>Sin advertencias.</li>';
 
   await cargarCorreccionesVigentes();
+  await cargarHistorialTributacion();
 }
+
+// ---------- Historial de tributación (tabla tributacion_historial) ----------
+// Cada cálculo que el contador decide guardar deja una línea fija con
+// fecha y hora (pedido del cliente, punto 2). El borrado es solo para
+// dueño/admin/proveedor (lo aplica también el backend con 403; aquí solo
+// se oculta el botón para no ofrecer una acción que el servidor va a
+// rechazar).
+async function cargarHistorialTributacion() {
+  const tb = document.getElementById('tbHistorialTrib');
+  if (!tb) return;
+  let filas;
+  try { filas = await apiFetch('/contabilidad/tributacion/historial'); }
+  catch (e) { tb.innerHTML = `<tr><td colspan="8" class="vacio">${esc(e.message)}</td></tr>`; return; }
+
+  tb.innerHTML = filas.length
+    ? filas.map((f) => `
+      <tr>
+        <td>${fechaHora(f.creado_en)}</td>
+        <td class="izq">${esc(f.periodo)}</td>
+        <td>${money(f.base_ingresos)}</td>
+        <td>${money(f.base_gastos)}</td>
+        <td>${money(f.base_imponible)}</td>
+        <td>${money(f.tributo)}</td>
+        <td class="izq">${esc(f.usuario_nombre || '')}</td>
+        <td>${rolEsAdmin() ? `<button class="btn-x" data-id="${f.id}" title="Eliminar línea del historial">✕</button>` : ''}</td>
+      </tr>`).join('')
+    : '<tr><td colspan="8" class="vacio">Todavía no hay cálculos guardados en el historial.</td></tr>';
+
+  tb.querySelectorAll('.btn-x').forEach((b) => {
+    b.addEventListener('click', async () => {
+      if (!confirm('¿Eliminar esta línea del historial de tributación? No se puede deshacer.')) return;
+      const motivo = prompt('Motivo del borrado (obligatorio):');
+      if (!motivo || !motivo.trim()) { alert('Debe indicar un motivo.'); return; }
+      try {
+        await apiFetch(`/contabilidad/tributacion/historial/${b.dataset.id}`, {
+          method: 'DELETE', body: JSON.stringify({ motivo: motivo.trim() }),
+        });
+        await cargarHistorialTributacion();
+      } catch (e) { alert('No se pudo borrar: ' + e.message); }
+    });
+  });
+}
+
+document.getElementById('btnGuardarHistorial').addEventListener('click', async () => {
+  if (!ultimoPeriodoTributacion) { alert('Calcule primero la tributación del período.'); return; }
+  const periodo = document.getElementById('tPeriodo').value;
+  const params = { periodo, tipo_empresa: document.getElementById('tTipoEmpresa').value };
+  if (periodo === 'rango') {
+    params.desde = document.getElementById('tDesde').value;
+    params.hasta = document.getElementById('tHasta').value;
+  }
+  try {
+    await apiFetch('/contabilidad/tributacion/historial', { method: 'POST', body: JSON.stringify(params) });
+    alert('Cálculo guardado en el historial.');
+    await cargarHistorialTributacion();
+  } catch (e) { alert('No se pudo guardar en el historial: ' + e.message); }
+});
 
 // ---------- Tabla de correcciones vigentes (con opción de anular) ----------
 async function cargarCorreccionesVigentes() {

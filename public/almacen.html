@@ -58,6 +58,19 @@
         <input type="number" step="0.01" id="precioCosto" placeholder="Precio de Costo" required>
         <input type="number" step="0.01" id="precioVenta" placeholder="Precio de Venta (opcional)">
         <input type="number" step="0.01" id="stockMinimo" placeholder="Stock Mínimo (opcional)">
+
+        <!-- Cantidad inicial (opcional): si se indica, además de crear
+             el producto se registra una ENTRADA por esa cantidad, igual
+             que si se hiciera después desde "Registrar Entrada / Salida"
+             (mismo rastro en el historial de movimientos). Si se deja
+             vacío, el producto se crea sin existencia, como hasta ahora. -->
+        <input type="number" step="0.01" id="cantidadInicial" placeholder="Cantidad inicial (opcional)">
+        <select id="altaAlmacen" class="hidden">
+          <!-- Solo se muestra si el usuario puede elegir entre más de un
+               almacén; se llena en almacen.js con la misma lista que ya
+               usa el selector de movimientos. -->
+        </select>
+
         <button type="submit">Guardar Producto</button>
       </form>
     </div>
@@ -203,6 +216,7 @@
 
   <script src="js/api.js"></script>
   <script src="js/sonidos.js"></script>
+  <script src="js/avisos.js"></script>
   <script src="js/almacen.js"></script>
 </body>
 </html>

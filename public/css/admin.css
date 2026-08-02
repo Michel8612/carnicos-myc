@@ -94,6 +94,30 @@ header h1 {
 .t-ventas       { border-top-color: #0288d1; }
 .t-contabilidad { border-top-color: #37474f; }
 .t-usuarios     { border-top-color: #3f51b5; }
+/* Áreas nuevas (sección 10). Se mantiene la misma familia de tonos para
+   que el croquis siga leyéndose como un solo panel y no como dos épocas
+   distintas de la aplicación. */
+.t-indicadores  { border-top-color: #00897b; }
+.t-informes     { border-top-color: #455a64; }
+.t-cuentas      { border-top-color: #6d4c41; }
+.t-presupuestos { border-top-color: #558b2f; }
+.t-conciliacion { border-top-color: #7b1fa2; }
+.t-respaldos    { border-top-color: #c62828; }
+
+/* Ajustes técnicos: una línea discreta al pie del croquis. No compiten
+   visualmente con las áreas de trabajo porque no se usan a diario. */
+.ajustes-linea {
+  margin: 26px 0 0;
+  text-align: center;
+  font-size: 13px;
+  color: #90a4ae;
+}
+.ajustes-linea a {
+  color: #607d8b;
+  text-decoration: none;
+  margin: 0 4px;
+}
+.ajustes-linea a:hover { text-decoration: underline; }
 
 /* Responsive: una columna en teléfono, varias en PC (ya lo resuelve
    el grid con auto-fit/minmax, aquí solo se ajusta el tamaño). */

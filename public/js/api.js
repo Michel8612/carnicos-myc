@@ -286,6 +286,19 @@ const API = {
   documentosLegales: () => apiFetch('/legal/documentos'),
   aceptarLegal: (versiones) => apiFetch('/legal/aceptar', { method: 'POST', body: JSON.stringify({ versiones }) }),
   guardarDocumentoLegal: (d) => apiFetch('/legal/documentos', { method: 'POST', body: JSON.stringify(d) }),
+
+  // ---- Conexiones externas (tasa del dólar, pagos) ----
+  // El servidor nunca devuelve el valor guardado, solo si está puesto y
+  // sus últimos caracteres; por eso no hay un "leerCredencial".
+  credenciales: () => apiFetch('/credenciales'),
+  guardarCredencial: (clave, valor) =>
+    apiFetch(`/credenciales/${clave}`, { method: 'PUT', body: JSON.stringify({ valor }) }),
+  borrarCredencial: (clave) => apiFetch(`/credenciales/${clave}`, { method: 'DELETE' }),
+
+  // ---- Avisos ----
+  avisos: () => apiFetch('/notificaciones'),
+  avisosContador: () => apiFetch('/notificaciones/contador'),
+  avisoLeido: (id) => apiFetch(`/notificaciones/${id}/leida`, { method: 'POST' }),
 };
 
 // Exponer en window para las páginas (scripts clásicos).

@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Credenciales - Cárnicos M&C</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    body.cred-body { margin:0; font-family:Arial, Helvetica, sans-serif; background:linear-gradient(to bottom,#f5f5f5,#e0f7fa); color:#000; }
+    header { text-align:center; padding:18px 20px 20px; background:#37474f; color:#fff; box-shadow:0 2px 6px rgba(0,0,0,.25); }
+    .logo-empresa { width:76px; height:76px; object-fit:contain; display:block; margin:0 auto 8px; background:#fff; border-radius:50%; padding:6px; box-shadow:0 2px 8px rgba(0,0,0,.3); }
+    header h1 { color:#fff; font-size:24px; letter-spacing:.5px; text-shadow:0 1px 3px rgba(0,0,0,.4); margin:8px 0; }
+
+    .cred-wrap { max-width:950px; margin:0 auto; padding:0 12px 40px; }
+    p.sub { margin:0 0 10px; font-size:12.5px; color:#777; }
+
+    .tarjeta { background:#fff; border-radius:12px; padding:16px; box-shadow:0 3px 10px rgba(0,0,0,.12); margin-bottom:16px; }
+
+    .fila-cred { display:grid; grid-template-columns: 1fr; gap:10px; padding:14px 0; border-top:1px solid #eceff1; }
+    .fila-cred:first-child { border-top:none; }
+    .fc-cabecera { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap; }
+    .fc-nombre { font-weight:bold; font-size:14.5px; color:#283593; }
+    .fc-desc { font-size:12.5px; color:#666; margin-top:2px; }
+    .fc-estado { display:flex; flex-direction:column; align-items:flex-end; gap:4px; }
+
+    .etq { padding:3px 8px; border-radius:10px; font-size:11px; font-weight:bold; display:inline-block; white-space:nowrap; }
+    .e-si { background:#e8f5e9; color:#2e7d32; } .e-no { background:#ffebee; color:#c62828; }
+    .e-origen { background:#e3f2fd; color:#1565C0; }
+
+    .fc-cuerpo { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    .fc-cuerpo input[type="password"], .fc-cuerpo input[type="text"] {
+      flex:1; min-width:220px; padding:9px 10px; border:1px solid #ccc; border-radius:8px; font-size:14px; box-sizing:border-box; font-family:inherit;
+    }
+
+    .btn { padding:9px 16px; border:none; border-radius:8px; cursor:pointer; font-size:13.5px; font-weight:bold; white-space:nowrap; }
+    .btn-azul { background:#1976D2; color:#fff; } .btn-azul:hover { background:#1565C0; }
+    .btn-verde { background:#2e7d32; color:#fff; } .btn-verde:hover { background:#1b5e20; }
+    .btn-x { background:#ef5350; color:#fff; } .btn-x:hover { background:#c62828; }
+    .btn-gris { background:#607d8b; color:#fff; } .btn-gris:hover { background:#455a64; }
+    .btn:disabled { opacity:.55; cursor:not-allowed; }
+
+    .fc-resultado { font-size:12.5px; margin-top:2px; }
+    .fc-resultado.ok { color:#2e7d32; } .fc-resultado.error { color:#c62828; }
+
+    .aviso { background:#fff8e1; border:1px solid #ffca28; color:#7a5c00; border-radius:8px; padding:10px 14px; font-size:12.5px; margin:14px 0; }
+    .aviso b { color:#5d4400; }
+
+    .vacio { text-align:center; color:#777; padding:24px; }
+
+    @media (max-width:600px) { .fc-cabecera { flex-direction:column; } .fc-estado { align-items:flex-start; } }
+    /* Tarjeta de cada conexión. El estado se lee de un vistazo: es lo
+       primero que mira quien entra aquí ("¿está puesta o no?"). */
+    .cred { margin-bottom:14px; }
+    .cred-cabecera { display:flex; justify-content:space-between; gap:14px; flex-wrap:wrap; align-items:flex-start; }
+    .cred-cabecera strong { font-size:15px; color:#263238; }
+    .cred-estado { text-align:right; font-size:12.5px; }
+    .cred-estado small { display:block; color:#90a4ae; margin-top:2px; }
+    .estado-si { color:#2e7d32; font-weight:bold; }
+    .estado-no { color:#c62828; font-weight:bold; }
+    .cred-acciones { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+    .cred-acciones .cred-valor { flex:1; min-width:200px; padding:9px; border:1px solid #ccc; border-radius:8px; font-size:14px; }
+    .btn-guardar { background:#1976D2; color:#fff; }
+    .btn-probar  { background:#00897b; color:#fff; }
+    .btn-borrar  { background:#c62828; color:#fff; }
+    .cred-aviso { margin:10px 0 0; font-size:13px; min-height:16px; }
+    .cred-aviso.bueno { color:#2e7d32; }
+    .cred-aviso.malo  { color:#c62828; }
+    .cred-error { color:#c62828; }
+  </style>
+</head>
+
+<body class="cred-body">
+  <header>
+    <img src="img/logo.png" alt="Cárnicos M&C" class="logo-empresa logo-circulo">
+    <h1>Credenciales</h1>
+    <div class="top-nav">
+      <a href="#" id="navPanel" style="display:none;">← Panel</a>
+      <a href="#" onclick="logout();return false;">Salir</a>
+    </div>
+  </header>
+
+  <main class="cred-wrap">
+    <p class="sub">
+      Tokens y claves de servicios externos (tasa del dólar, pasarelas de pago...). Se ponen aquí y
+      funcionan al momento, sin tocar código ni volver a desplegar. Por seguridad, una vez guardado un
+      valor no se vuelve a mostrar: solo se ven sus últimos 4 caracteres.
+    </p>
+
+    <div class="tarjeta">
+      <div id="listaCredenciales">
+        <div class="vacio">Cargando…</div>
+      </div>
+    </div>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/sonidos.js"></script>
+  <script src="js/credenciales.js"></script>
+</body>
+</html>

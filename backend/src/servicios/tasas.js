@@ -18,6 +18,7 @@
 // ============================================================
 
 import db from '../db/index.js';
+import { obtenerCredencial } from '../routes/credenciales.js';
 
 const UNA_HORA_MS = 60 * 60 * 1000;
 const TIMEOUT_MS = 7000; // conexión mala en Cuba: que nunca cuelgue la app
@@ -31,10 +32,16 @@ const MONEDA = 'USD';
 const PROVEEDORES = {
   eltoque: {
     nombre: 'elTOQUE',
-    // Sin token no tiene sentido ni intentar la llamada.
-    disponible: () => Boolean(process.env.ELTOQUE_TOKEN),
+    // Sin token no tiene sentido ni intentar la llamada. El token sale
+    // de obtenerCredencial(): 1º lo que el dueño puso en el panel
+    // (Empresa → Credenciales), 2º la variable de entorno ELTOQUE_TOKEN
+    // del despliegue. Por eso pasó de ser síncrono a async: consultar
+    // la base cuesta una petición más, pero es la única forma de que
+    // "el dueño puso el token en el panel" tenga efecto AL MOMENTO, sin
+    // esperar a un reinicio del contenedor serverless.
+    disponible: async () => Boolean(await obtenerCredencial('ELTOQUE_TOKEN')),
     async consultar() {
-      const token = process.env.ELTOQUE_TOKEN;
+      const token = await obtenerCredencial('ELTOQUE_TOKEN');
       const controlador = new AbortController();
       const temporizador = setTimeout(() => controlador.abort(), TIMEOUT_MS);
       try {
@@ -216,7 +223,7 @@ export async function obtenerTasa({ forzar = false } = {}) {
 
   // 2. Intentar el proveedor activo.
   const proveedor = PROVEEDORES[PROVEEDOR_ACTIVO];
-  if (proveedor.disponible()) {
+  if (await proveedor.disponible()) {
     try {
       const resultado = await proveedor.consultar();
       try {
@@ -242,7 +249,7 @@ export async function obtenerTasa({ forzar = false } = {}) {
   // Sin token: directo al respaldo, sin intentar la llamada.
   return respaldo({
     margen,
-    motivo: 'Todavía no se ha configurado el token de elTOQUE (ELTOQUE_TOKEN).',
+    motivo: 'Todavía no se ha puesto el token de elTOQUE. Se pone desde el panel, en Empresa → Credenciales.',
     ultima,
   });
 }

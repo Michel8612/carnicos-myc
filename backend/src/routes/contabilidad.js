@@ -81,13 +81,39 @@ async function verificarAutorizacionSegura(token) {
 // ============================================================
 //  RESUMEN GENERAL — todo en una sola pantalla
 // ============================================================
+// Filtro de "área" (origen) reutilizado por /resumen y /movimientos: elegir
+// si se está mirando el punto de venta, un almacén concreto o la cocina
+// (ver punto 3 del pedido del cliente). 'venta' no tiene existencias ni
+// movimientos de almacén propios (eso vive en la sección VENTAS, aparte),
+// así que para ese origen se fuerza la lista vacía a propósito — el
+// frontend explica con texto claro por qué no hay filas. 'cocina' se
+// reconoce por el NOMBRE del almacén (no hay una columna "tipo" en
+// `almacenes`), con el mismo estilo de comparación sin acentos/mayúsculas
+// que ya se usa más abajo para reconocer gastos de nómina.
+function filtroAreaAlmacen(origen, almacenId, aliasTabla = 'a') {
+  const cond = [];
+  const params = [];
+  if (origen === 'venta') {
+    cond.push('1=0');
+  } else {
+    if (almacenId) { cond.push(`${aliasTabla}.id = ?`); params.push(Number(almacenId)); }
+    if (origen === 'cocina') {
+      cond.push(`translate(lower(${aliasTabla}.nombre), 'áéíóúñ', 'aeioun') LIKE '%cocina%'`);
+    }
+  }
+  return { where: cond.length ? 'AND ' + cond.join(' AND ') : '', params };
+}
+
 router.get('/resumen', async (req, res) => {
+  const { origen, almacen_id } = req.query;
+  const filtroAlmacen = filtroAreaAlmacen(origen, almacen_id, 'a');
+
   // ---------- ALMACÉN ----------
   // Qué hay, cuánto costó y cuánto vale; con su ganancia estimada
   // si se vendiera al precio de venta fijado.
   const almacen = await db.prepare(`
     SELECT p.id, p.nombre, p.tipo, COALESCE(u.abreviatura,'') AS unidad,
-           a.nombre AS almacen, resp.nombre AS responsable,
+           a.id AS almacen_id, a.nombre AS almacen, resp.nombre AS responsable,
            COALESCE(e.cantidad,0)   AS cantidad,
            COALESCE(p.precio_costo,0) AS costo_unitario,
            COALESCE(p.precio_venta,0) AS precio_venta
@@ -96,9 +122,9 @@ router.get('/resumen', async (req, res) => {
     JOIN almacenes a  ON a.id = e.almacen_id
     LEFT JOIN unidades u ON u.id = p.unidad_id
     LEFT JOIN usuarios resp ON resp.id = a.usuario_id
-    WHERE p.activo = 1
+    WHERE p.activo = 1 ${filtroAlmacen.where}
     ORDER BY a.nombre, p.nombre
-  `).all();
+  `).all(...filtroAlmacen.params);
 
   let almValorCosto = 0, almValorVenta = 0, almGananciaPot = 0;
   const almacenFilas = almacen.map((f) => {
@@ -361,19 +387,22 @@ router.post('/libro/borrar-autorizado', async (req, res) => {
 //  MOVIMIENTOS DEL ALMACÉN (entradas y salidas, con su valor)
 // ============================================================
 router.get('/movimientos', async (req, res) => {
+  const { origen, almacen_id } = req.query;
+  const filtroAlmacen = filtroAreaAlmacen(origen, almacen_id, 'a');
   const filas = await db.prepare(`
     SELECT m.id, m.fecha, m.tipo, m.cantidad, m.nota, m.origen_tipo,
            p.nombre AS producto, COALESCE(u.abreviatura,'') AS unidad,
            COALESCE(p.precio_costo,0) AS costo_unitario,
-           a.nombre AS almacen, us.nombre AS usuario
+           a.id AS almacen_id, a.nombre AS almacen, us.nombre AS usuario
     FROM movimientos m
     JOIN productos p ON p.id = m.producto_id
     LEFT JOIN unidades u ON u.id = p.unidad_id
     LEFT JOIN almacenes a ON a.id = m.almacen_id
     LEFT JOIN usuarios us ON us.id = m.usuario_id
+    WHERE 1=1 ${filtroAlmacen.where}
     ORDER BY m.fecha DESC
     LIMIT 300
-  `).all();
+  `).all(...filtroAlmacen.params);
   res.json(filas.map((f) => ({
     ...f,
     valor: Number((f.cantidad * f.costo_unitario).toFixed(2)),
@@ -592,25 +621,54 @@ router.delete('/tributacion/correcciones/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
-// El cálculo en sí: saca todas las bases de lo que YA está registrado
-// en el sistema (nada se vuelve a teclear) y aplica los tributos del
-// régimen elegido.
-router.get('/tributacion', async (req, res) => {
+// ------------------------------------------------------------
+//  El cálculo en sí: saca todas las bases de lo que YA está registrado
+//  en el sistema (nada se vuelve a teclear) y aplica los tributos del
+//  régimen elegido.
+//
+//  CAMBIO DE BASE (pedido del cliente, 2026-08; ver también el
+//  comentario grande en config/tributacion.js): antes "ventas_brutas"
+//  salía de las ventas y el movimiento de mercancía
+//  (contabilidad_registros, tipo='venta'). El cliente declara sobre lo
+//  que le ENTRA por el banco, no sobre lo que mueve el almacén, así que
+//  ahora:
+//    · Ingresos = SUM(monto) de `movimientos_bancarios` con
+//      tipo='ingreso' (entradas reales de dinero a las cuentas de
+//      `cuentas_bancarias`), sin contar las anuladas (estado='anulado').
+//    · Gastos   = igual que siempre, tabla `gastos` (sin cambios).
+//    · Ventas, almacén, recetas y producción YA NO entran en el cálculo.
+//  Se conserva el nombre interno "ventas_brutas" (es la clave que usan
+//  las correcciones manuales de tributacion_correcciones y el régimen
+//  "Otro" guardado en `parametros`) para no invalidar en silencio lo que
+//  el contador ya haya corregido a mano: solo cambia DE DÓNDE sale el
+//  número. Lo mismo con "utilidad_neta": ahora es ingresos bancarios
+//  menos gastos, no ganancia de ventas menos gastos.
+//
+//  Se saca a una función aparte (no vive solo dentro de la ruta GET)
+//  porque el historial (POST /tributacion/historial, más abajo) tiene
+//  que recalcular EXACTAMENTE lo mismo que ve el contador en pantalla
+//  antes de guardar la línea — así el historial nunca guarda un número
+//  que el usuario no vio primero, y nunca confía en cifras que mande el
+//  navegador.
+// ------------------------------------------------------------
+async function calcularTributacion({ tipoEmpresaReq, periodoReq, desdeReq, hastaReq }) {
   const mapaParametros = await leerParametrosTributarios();
-  const tipoEmpresa = TIPOS_EMPRESA.includes(req.query.tipo_empresa)
-    ? req.query.tipo_empresa
+  const tipoEmpresa = TIPOS_EMPRESA.includes(tipoEmpresaReq)
+    ? tipoEmpresaReq
     : (mapaParametros[CLAVE_TIPO_EMPRESA] || 'microempresa');
 
-  const periodo = ['mes', 'trimestre', 'ano', 'rango'].includes(req.query.periodo)
-    ? req.query.periodo
+  const periodo = ['mes', 'trimestre', 'ano', 'rango'].includes(periodoReq)
+    ? periodoReq
     : 'mes';
 
   let desde, hasta;
   if (periodo === 'rango') {
-    desde = req.query.desde || null;
-    hasta = req.query.hasta || null;
+    desde = desdeReq || null;
+    hasta = hastaReq || null;
     if (!desde || !hasta) {
-      return res.status(400).json({ error: 'Para un rango personalizado indique desde y hasta.' });
+      const err = new Error('Para un rango personalizado indique desde y hasta.');
+      err.publico = true;
+      throw err;
     }
   } else {
     const { hoy } = await db.prepare(
@@ -619,17 +677,35 @@ router.get('/tributacion', async (req, res) => {
     ({ desde, hasta } = limitesPeriodo(periodo, hoy));
   }
 
-  // ---------- Ventas brutas + ganancia (ingreso - costo) del período ----------
-  const ventas = await db.prepare(`
-    SELECT COALESCE(SUM(ingreso),0) AS ingreso,
-           COALESCE(SUM(costo),0)   AS costo,
-           COALESCE(SUM(ganancia),0) AS ganancia
-    FROM contabilidad_registros
-    WHERE tipo = 'venta'
-      AND (fecha AT TIME ZONE 'America/Havana')::date BETWEEN ? AND ?
+  // ---------- Ingresos: SOLO entradas de dinero en cuentas bancarias ----------
+  const ingresos = await db.prepare(`
+    SELECT COALESCE(SUM(mb.monto),0) AS total,
+           array_agg(DISTINCT mb.moneda) AS monedas,
+           COUNT(*) AS cantidad
+    FROM movimientos_bancarios mb
+    WHERE mb.tipo = 'ingreso'
+      AND mb.estado != 'anulado'
+      AND (mb.fecha AT TIME ZONE 'America/Havana')::date BETWEEN ? AND ?
   `).get(desde, hasta);
 
-  // ---------- Gastos deducibles del período, desglosados por categoría ----------
+  // Desglose por cuenta bancaria (solo informativo, igual espíritu que
+  // el desglose de gastos por categoría de aquí abajo).
+  const ingresosPorCuenta = await db.prepare(`
+    SELECT COALESCE(cb.alias, cb.banco) AS cuenta,
+           COALESCE(SUM(mb.monto),0) AS total
+    FROM movimientos_bancarios mb
+    JOIN cuentas_bancarias cb ON cb.id = mb.cuenta_id
+    WHERE mb.tipo = 'ingreso'
+      AND mb.estado != 'anulado'
+      AND (mb.fecha AT TIME ZONE 'America/Havana')::date BETWEEN ? AND ?
+    GROUP BY cuenta
+    ORDER BY total DESC
+  `).all(desde, hasta);
+
+  const ingresosBancarios = Number(Number(ingresos.total).toFixed(2));
+  const monedasMezcladasIngresos = Array.isArray(ingresos.monedas) && ingresos.monedas.length > 1;
+
+  // ---------- Gastos deducibles del período, desglosados por categoría (sin cambios) ----------
   const gastosPorCategoria = await db.prepare(`
     SELECT categoria, COALESCE(SUM(monto),0) AS total, array_agg(DISTINCT moneda) AS monedas
     FROM gastos
@@ -647,6 +723,7 @@ router.get('/tributacion', async (req, res) => {
 
   // ---------- Nómina (para la seguridad social): gastos cuya categoría ----------
   // suene a nómina/salario/sueldo, sin importar mayúsculas ni acentos.
+  // Sin cambios: sigue viniendo de `gastos`.
   const nomina = await db.prepare(`
     SELECT COALESCE(SUM(monto),0) AS total
     FROM gastos
@@ -654,23 +731,25 @@ router.get('/tributacion', async (req, res) => {
       AND translate(lower(categoria), 'áéíóúñ', 'aeioun') ~ '(nomina|salario|sueldo)'
   `).get(desde, hasta);
 
-  // ---------- Compras (informativo: hoy no hay pantalla que las registre) ----------
+  // ---------- Compras y producción (informativo, sin cambios) ----------
+  // Ya eran solo informativas (nunca alimentaron el cálculo): se dejan
+  // igual, para que el contador vea que el sistema las sigue registrando.
   const compras = await db.prepare(`
     SELECT COALESCE(SUM(costo_total),0) AS total, COUNT(*) AS cantidad
     FROM compras
     WHERE (fecha_llegada AT TIME ZONE 'America/Havana')::date BETWEEN ? AND ?
   `).get(desde, hasta);
 
-  // ---------- Producción (informativo) ----------
   const produccion = await db.prepare(`
     SELECT COALESCE(SUM(costo_total),0) AS total, COUNT(*) AS cantidad
     FROM producciones
     WHERE (fecha AT TIME ZONE 'America/Havana')::date BETWEEN ? AND ?
   `).get(desde, hasta);
 
-  const ventasBrutas = Number(Number(ventas.ingreso).toFixed(2));
-  const gananciaVentas = Number(Number(ventas.ganancia).toFixed(2));
-  const utilidadNeta = Number((gananciaVentas - gastosTotal).toFixed(2));
+  // "ventas_brutas" ya no mide ventas: mide ingresos bancarios (ver
+  // comentario grande arriba). "utilidad_neta" = ingresos - gastos.
+  const ventasBrutas = ingresosBancarios;
+  const utilidadNeta = Number((ingresosBancarios - gastosTotal).toFixed(2));
   const baseImponible = Number(Math.max(0, utilidadNeta).toFixed(2));
   const nominaTotal = Number(Number(nomina.total).toFixed(2));
 
@@ -686,7 +765,7 @@ router.get('/tributacion', async (req, res) => {
   // ---------- Aplicar correcciones manuales vigentes del período ----------
   // (ver POST /tributacion/correcciones más arriba). Cada corrección es
   // una capa independiente sobre el número calculado: no se recalcula
-  // nada en cascada a partir de ella.
+  // nada en cascada a partir de ella. Sin cambios.
   const correccionesFilas = await db.prepare(`
     SELECT * FROM tributacion_correcciones
     WHERE anulada = 0 AND periodo_desde <= ? AND periodo_hasta >= ?
@@ -738,6 +817,13 @@ router.get('/tributacion', async (req, res) => {
       'Revise que el conjunto siga siendo coherente.'
     );
   }
+  if (ingresos.cantidad === 0) {
+    advertencias.push(
+      'No hay movimientos bancarios de tipo "ingreso" registrados en este período: los ingresos ' +
+      'para el tributo se están calculando en 0. Registre las entradas de dinero en las cuentas ' +
+      'bancarias para que el estimado sea real.'
+    );
+  }
   if (nominaTotal === 0) {
     advertencias.push(
       'No hay gastos registrados con categoría de nómina/salario/sueldo en este período: ' +
@@ -747,9 +833,8 @@ router.get('/tributacion', async (req, res) => {
   }
   if (compras.cantidad === 0) {
     advertencias.push(
-      'La tabla de compras todavía no se alimenta desde ninguna pantalla del sistema, ' +
-      'así que el costo de mercancía comprada en el período no está reflejado aparte ' +
-      '(solo se ve indirectamente, vía el costo de lo ya vendido).'
+      'La tabla de compras todavía no se alimenta desde ninguna pantalla del sistema ' +
+      '(esto es solo informativo: compras y producción no forman parte del cálculo del tributo).'
     );
   }
   if (monedasMezcladas) {
@@ -758,14 +843,20 @@ router.get('/tributacion', async (req, res) => {
       'lo que puede distorsionar el total de gastos deducibles.'
     );
   }
+  if (monedasMezcladasIngresos) {
+    advertencias.push(
+      'Hay entradas bancarias en más de una moneda en este período; se sumaron los montos sin ' +
+      'convertir, lo que puede distorsionar el total de ingresos.'
+    );
+  }
   if (utilidadNeta < 0) {
     advertencias.push(
-      'El período cerró con pérdida (utilidad neta negativa): no se calculan tributos ' +
-      'sobre utilidades cuando no hay ganancia.'
+      'El período cerró con pérdida (los ingresos bancarios no alcanzan a cubrir los gastos): ' +
+      'no se calculan tributos sobre utilidades cuando no hay ganancia.'
     );
   }
 
-  res.json({
+  return {
     ventas_brutas: ventasBrutasC.valor,
     gastos_deducibles: {
       total: gastosTotalC.valor,
@@ -776,6 +867,10 @@ router.get('/tributacion', async (req, res) => {
       corregido: !!gastosTotalC.correccion,
       correccion: gastosTotalC.correccion,
     },
+    ingresos_por_cuenta: ingresosPorCuenta.map((c) => ({
+      cuenta: c.cuenta || '(sin nombre)',
+      total: Number(Number(c.total).toFixed(2)),
+    })),
     utilidad_neta: utilidadNetaC.valor,
     base_imponible: baseImponibleC.valor,
     tributos: tributosFinal,
@@ -802,7 +897,118 @@ router.get('/tributacion', async (req, res) => {
       regimen_nombre: regimenCombinado.nombre,
     },
     advertencias,
+  };
+}
+
+router.get('/tributacion', async (req, res) => {
+  try {
+    const resultado = await calcularTributacion({
+      tipoEmpresaReq: req.query.tipo_empresa,
+      periodoReq: req.query.periodo,
+      desdeReq: req.query.desde,
+      hastaReq: req.query.hasta,
+    });
+    res.json(resultado);
+  } catch (e) {
+    if (e.publico) return res.status(400).json({ error: e.message });
+    throw e;
+  }
+});
+
+// ============================================================
+//  HISTORIAL DE TRIBUTACIÓN — tabla `tributacion_historial` (ya existe,
+//  no se toca schema.sql). Cada vez que el contador guarda un cálculo
+//  queda una línea fija con fecha y hora, para poder mirar atrás lo que
+//  se declaró en períodos anteriores aunque después cambien las cifras
+//  de gastos/ingresos actuales.
+// ============================================================
+
+// Guarda una línea nueva. Recalcula del lado del servidor con
+// calcularTributacion() en vez de confiar en números que mande el
+// navegador: así el historial es fiel a lo que de verdad hay
+// registrado en ese momento, no a lo que alguien pudiera manipular en
+// el cliente.
+router.post('/tributacion/historial', async (req, res) => {
+  const { tipo_empresa, periodo, desde, hasta } = req.body || {};
+  let resultado;
+  try {
+    resultado = await calcularTributacion({
+      tipoEmpresaReq: tipo_empresa, periodoReq: periodo, desdeReq: desde, hastaReq: hasta,
+    });
+  } catch (e) {
+    if (e.publico) return res.status(400).json({ error: e.message });
+    throw e;
+  }
+
+  const periodoTexto = `${resultado.resumen.periodo} (${resultado.resumen.desde} a ${resultado.resumen.hasta})`;
+  // `detalle` guarda el desglose completo (tributos, régimen, advertencias)
+  // como JSON de referencia; las columnas propias (base_ingresos,
+  // base_gastos, base_imponible, tributo) son las que ya trae la tabla.
+  const detalle = JSON.stringify({
+    tipo_empresa: resultado.resumen.tipo_empresa,
+    regimen_nombre: resultado.resumen.regimen_nombre,
+    tributos: resultado.tributos,
+    advertencias: resultado.advertencias,
   });
+
+  const r = await db.prepare(`
+    INSERT INTO tributacion_historial
+      (periodo, base_ingresos, base_gastos, base_imponible, tributo, detalle, usuario_id, usuario_nombre)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    periodoTexto,
+    resultado.ventas_brutas,             // base_ingresos: entradas bancarias del período
+    resultado.gastos_deducibles.total,   // base_gastos
+    resultado.base_imponible,
+    resultado.total_tributos,
+    detalle,
+    req.usuario.id,
+    req.usuario.usuario || req.usuario.nombre || null,
+  );
+
+  await auditar({
+    modulo: 'tributacion', accion: 'crear', req, entidad: 'tributacion_historial', entidad_id: r.lastInsertRowid,
+    descripcion: `Cálculo de tributación guardado en el historial (${periodoTexto}): tributo estimado ${resultado.total_tributos}.`,
+    despues: {
+      base_ingresos: resultado.ventas_brutas, base_gastos: resultado.gastos_deducibles.total,
+      base_imponible: resultado.base_imponible, tributo: resultado.total_tributos,
+    },
+  });
+
+  res.json({ ok: true, id: r.lastInsertRowid });
+});
+
+router.get('/tributacion/historial', async (req, res) => {
+  const limite = Math.min(Number(req.query.limite) || 300, 1000);
+  const filas = await db.prepare(`
+    SELECT * FROM tributacion_historial ORDER BY creado_en DESC LIMIT ${limite}
+  `).all();
+  res.json(filas);
+});
+
+// Borrar una línea del historial: SOLO dueño/admin/proveedor (mismo
+// criterio que ES_ADMIN de arriba). Cualquier otro rol con acceso de
+// escritura en contabilidad recibe 403, aunque pueda ver/crear en esta
+// sección. Motivo obligatorio y queda auditado.
+router.delete('/tributacion/historial/:id', async (req, res) => {
+  if (!ES_ADMIN(req.usuario.rol)) {
+    return res.status(403).json({ error: 'Borrar del historial de tributación es solo del dueño/admin/proveedor.' });
+  }
+  const { motivo } = req.body || {};
+  if (!motivo || !String(motivo).trim()) {
+    return res.status(400).json({ error: 'Debe indicar el motivo del borrado.' });
+  }
+  const id = Number(req.params.id);
+  const fila = await db.prepare('SELECT * FROM tributacion_historial WHERE id = ?').get(id);
+  if (!fila) return res.status(404).json({ error: 'No existe esa línea del historial.' });
+
+  await db.prepare('DELETE FROM tributacion_historial WHERE id = ?').run(id);
+  await auditar({
+    modulo: 'tributacion', accion: 'eliminar', req, entidad: 'tributacion_historial', entidad_id: id,
+    descripcion: `Línea del historial de tributación eliminada (período ${fila.periodo}, tributo ${fila.tributo}).`,
+    antes: fila, motivo: String(motivo).trim(),
+  });
+  res.json({ ok: true });
 });
 
 export default router;

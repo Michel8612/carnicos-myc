@@ -101,6 +101,25 @@
       menos los gastos registrados.
     </p>
 
+    <!-- Selector de área: punto de venta / un almacén concreto / cocina.
+         Afecta a los listados de Almacén (dentro del resumen) y a
+         Movimientos de almacén; Ventas ya ES el punto de venta. -->
+    <div class="fila-selectores" id="filaOrigen">
+      <div>
+        <label>Área que se está viendo</label>
+        <select id="selOrigen">
+          <option value="">Todos (sin filtrar)</option>
+          <option value="venta">Punto de venta</option>
+          <option value="almacen">Un almacén concreto</option>
+          <option value="cocina">Cocina</option>
+        </select>
+      </div>
+      <div id="wrapAlmacenId" class="oculto">
+        <label>Almacén</label>
+        <select id="selAlmacenId"></select>
+      </div>
+    </div>
+
     <div class="tabs">
       <button class="activo" data-panel="pAlmacen">Almacén</button>
       <button data-panel="pVentas">Ventas</button>
@@ -333,8 +352,9 @@
     <section class="panel" id="pTributacion">
       <h3 class="seccion">Tributación (estimado)</h3>
       <p class="sub">
-        Cálculo estimado a partir de lo ya registrado en el sistema (ventas, gastos, nómina).
-        No hay que volver a teclear nada.
+        Cálculo estimado a partir de lo ya registrado en el sistema (entradas bancarias, gastos,
+        nómina). No hay que volver a teclear nada. Los <b>ingresos</b> son solo las entradas de
+        dinero en las cuentas bancarias (ya NO cuentan ventas, almacén ni producción).
       </p>
       <div class="aviso-legal">
         <b>Aviso importante:</b> <span id="tribAvisoLegal">Los porcentajes son valores de referencia y deben confirmarse con la ONAT o un contador antes de declarar o pagar impuestos reales.</span>
@@ -391,9 +411,9 @@
         <div class="tarjeta c-azul" id="tarjVentasBrutas">
           <div class="n">
             <span id="tVentasBrutas">0.00</span>
-            <button class="btn-lapiz" data-clave="ventas_brutas" data-etiqueta="Ventas brutas" title="Corregir esta cifra">✎</button>
+            <button class="btn-lapiz" data-clave="ventas_brutas" data-etiqueta="Ingresos bancarios" title="Corregir esta cifra">✎</button>
           </div>
-          <div class="l">Ventas brutas</div>
+          <div class="l">Ingresos bancarios</div>
           <div class="marca-corregido oculto" id="mVentasBrutas"></div>
         </div>
         <div class="tarjeta c-rojo" id="tarjGastosDeducibles">
@@ -453,13 +473,44 @@
         </table>
       </div>
 
+      <h3 class="seccion">Ingresos por cuenta bancaria</h3>
+      <p class="sub">Desglose de las entradas de dinero del período, por cuenta.</p>
+      <div class="tabla-scroll">
+        <table class="datos">
+          <thead><tr><th class="izq">Cuenta</th><th>Total</th></tr></thead>
+          <tbody id="tbIngresosCuenta"></tbody>
+        </table>
+      </div>
+
       <h3 class="seccion">Advertencias</h3>
       <ul class="lista-advertencias" id="tribAdvertencias"></ul>
+
+      <h3 class="seccion">Historial de cálculos guardados</h3>
+      <p class="sub">
+        Cada vez que guarde el cálculo de arriba queda una línea fija con fecha y hora, para
+        consultar más adelante lo que se declaró en un período aunque después cambien los
+        gastos o ingresos registrados. Borrar una línea es solo del dueño/admin/proveedor.
+      </p>
+      <p style="margin:10px 0;">
+        <button class="b-verde" id="btnGuardarHistorial" type="button">Guardar este cálculo en el historial</button>
+      </p>
+      <div class="tabla-scroll">
+        <table class="datos">
+          <thead>
+            <tr>
+              <th>Fecha</th><th class="izq">Período</th><th>Ingresos</th><th>Gastos</th>
+              <th>Base imponible</th><th>Tributo</th><th class="izq">Usuario</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="tbHistorialTrib"></tbody>
+        </table>
+      </div>
     </section>
   </main>
 
   <script src="js/api.js"></script>
   <script src="js/sonidos.js"></script>
+  <script src="js/avisos.js"></script>
   <script src="js/contabilidad.js"></script>
 </body>
 </html>

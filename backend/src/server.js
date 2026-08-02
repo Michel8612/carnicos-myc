@@ -44,6 +44,11 @@ import auditoriaRoutes from './routes/auditoria.js';
 import empresaRoutes from './routes/empresa.js';
 import bancosRoutes from './routes/bancos.js';
 import legalRoutes from './routes/legal.js';
+// Sección 10 del ERP. Cada área en su propio archivo para que puedan
+// desarrollarse y probarse por separado.
+import respaldosRoutes from './routes/respaldos.js';
+import notificacionesRoutes from './routes/notificaciones.js';
+import credencialesRoutes from './routes/credenciales.js';
 import licenciaRoutes, { bloqueoPorLicencia } from './licencia/rutas.js';
 import { inicializarLicencia } from './licencia/licencia.js';
 import { requiereSesion, escrituraSoloRoles } from './middleware/auth.js';
@@ -61,7 +66,12 @@ const __dirname = (() => {
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+// 25 MB en lugar del límite por defecto (100 kB): al restaurar una copia
+// de seguridad el cuerpo de la petición es la base de datos entera en
+// JSON, y con el valor de fábrica esa petición se rechazaba con un 413
+// antes siquiera de llegar a la ruta. El resto de peticiones son
+// pequeñas, así que subir el tope no abre ninguna puerta nueva.
+app.use(express.json({ limit: '25mb' }));
 
 // Comprobación rápida de que el servidor está vivo.
 app.get('/api/salud', (req, res) => {
@@ -131,6 +141,20 @@ app.use('/api/bancos', requiereSesion, escrituraSoloRoles('contabilidad'), banco
 // Documentos legales: hay que poder leerlos y aceptarlos ANTES de tener
 // acceso al resto, por eso el control de sesión lo hace el router.
 app.use('/api/legal', legalRoutes);
+
+// ---- Sección 10 del ERP -------------------------------------------
+// Copias de seguridad: escribir aquí es exportar TODO el negocio o
+// sobrescribirlo. Solo el dueño; el router vuelve a comprobarlo por
+// dentro para la restauración, que es la operación irreversible.
+app.use('/api/respaldos', requiereSesion, escrituraSoloRoles(), respaldosRoutes);
+// Avisos: lectura para cualquiera con sesión.
+app.use('/api/notificaciones', requiereSesion, notificacionesRoutes);
+// Los informes contables, las cuentas por cobrar/pagar, los presupuestos
+// y la conciliación son la SEGUNDA entrega de la sección 10. Sus tablas ya
+// están creadas en el esquema; las rutas se montarán cuando existan.
+// Credenciales de servicios externos (elTOQUE, Transfermóvil...). Solo
+// el dueño: aquí se guardan claves de terceros.
+app.use('/api/credenciales', requiereSesion, escrituraSoloRoles(), credencialesRoutes);
 
 // ---- Middleware de errores: cualquier fallo en una ruta cae aquí ----
 // Devuelve un JSON claro con 500 en vez de tumbar el servidor.

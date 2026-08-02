@@ -24,11 +24,17 @@ console.log('\n=== TEST 14: GET /tributacion/regimenes ===');
   const r = await api('GET', '/api/contabilidad/tributacion/regimenes', tokAdmin);
   A(r.status === 200, `responde 200 (real ${r.status})`);
   const tipos = Object.keys(r.body.regimenes || {});
-  A(tipos.length === 3, `3 tipos de empresa (real ${tipos.length}: ${tipos.join(',')})`);
-  A(r.body.tipos_empresa.length === 3, 'tipos_empresa trae 3');
+  A(tipos.length === 4, `4 tipos de empresa, incluido "otro" (real ${tipos.length}: ${tipos.join(',')})`);
+  A(r.body.tipos_empresa.length === 4, 'tipos_empresa trae 4');
   for (const t of tipos) {
-    A(Array.isArray(r.body.regimenes[t].tributos) && r.body.regimenes[t].tributos.length === 4,
-      `${t} tiene 4 tributos (real ${r.body.regimenes[t].tributos?.length})`);
+    // "otro" es el regimen a medida: sus tributos los define el dueno en
+    // la configuracion, asi que en una base recien creada tiene menos de
+    // cuatro. Exigirle cuatro seria exigirle una configuracion que aun
+    // no ha hecho nadie.
+    const minimo = t === 'otro' ? 0 : 4;
+    const cuantos = r.body.regimenes[t].tributos?.length ?? -1;
+    A(Array.isArray(r.body.regimenes[t].tributos) && cuantos >= minimo,
+      `${t} tiene al menos ${minimo} tributos (real ${cuantos})`);
   }
 }
 
@@ -67,14 +73,15 @@ console.log('  Fecha Havana hoy:', hoy);
 // ============================================================
 console.log('\n=== TEST 15/17: bases y tributos exactos (rango = hoy) ===');
 {
+  // La base del tributo YA NO sale de las ventas: el cliente declara sobre
+  // lo que le entra por el banco. Las ventas, el almacen y las recetas
+  // quedaron deliberadamente fuera del calculo.
   const ventasEsperadas = sqlNum(`
-    SELECT COALESCE(SUM(ingreso),0) FROM contabilidad_registros
-    WHERE tipo='venta' AND (fecha AT TIME ZONE 'America/Havana')::date = '${hoy}'
+    SELECT COALESCE(SUM(monto),0) FROM movimientos_bancarios
+    WHERE tipo='ingreso' AND COALESCE(estado,'') <> 'anulado'
+      AND (fecha AT TIME ZONE 'America/Havana')::date = '${hoy}'
   `);
-  const gananciaEsperada = sqlNum(`
-    SELECT COALESCE(SUM(ganancia),0) FROM contabilidad_registros
-    WHERE tipo='venta' AND (fecha AT TIME ZONE 'America/Havana')::date = '${hoy}'
-  `);
+  const gananciaEsperada = ventasEsperadas;
   const gastosEsperados = sqlNum(`
     SELECT COALESCE(SUM(monto),0) FROM gastos
     WHERE (fecha AT TIME ZONE 'America/Havana')::date = '${hoy}'
@@ -82,11 +89,11 @@ console.log('\n=== TEST 15/17: bases y tributos exactos (rango = hoy) ===');
 
   const r = await api('GET', `/api/contabilidad/tributacion?periodo=rango&desde=${hoy}&hasta=${hoy}`, tokAdmin);
   A(r.status === 200, `responde 200 (real ${r.status})`);
-  A(r.body.ventas_brutas === Number(ventasEsperadas.toFixed(2)), `ventas_brutas coincide con DB (esperado ${ventasEsperadas}, real ${r.body.ventas_brutas})`);
+  A(r.body.ventas_brutas === Number(ventasEsperadas.toFixed(2)), `ingresos bancarios coinciden con la base (esperado ${ventasEsperadas}, real ${r.body.ventas_brutas})`);
   A(r.body.gastos_deducibles.total === Number(gastosEsperados.toFixed(2)), `gastos_deducibles.total coincide con DB (esperado ${gastosEsperados}, real ${r.body.gastos_deducibles.total})`);
 
   const utilidadEsperada = Number((gananciaEsperada - gastosEsperados).toFixed(2));
-  A(r.body.utilidad_neta === utilidadEsperada, `utilidad_neta = ganancia-gastos (esperado ${utilidadEsperada}, real ${r.body.utilidad_neta})`);
+  A(r.body.utilidad_neta === utilidadEsperada, `utilidad_neta = ingresos del banco - gastos (esperado ${utilidadEsperada}, real ${r.body.utilidad_neta})`);
   const baseEsperada = Number(Math.max(0, utilidadEsperada).toFixed(2));
   A(r.body.base_imponible === baseEsperada, `base_imponible = max(0,utilidad) (esperado ${baseEsperada}, real ${r.body.base_imponible})`);
 

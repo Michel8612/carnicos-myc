@@ -52,11 +52,32 @@
         <span class="croquis-nombre">Usuarios</span>
         <span class="croquis-desc">Altas, bajas y permisos del personal.</span>
       </a>
+      <!-- Informes contables, cobros y pagos, presupuestos y conteo físico
+           llegan en la segunda entrega. Sus tarjetas se añaden aquí cuando
+           las pantallas existan: un enlace a una página que no está es peor
+           que no tener el enlace. -->
+      <a class="croquis-tarjeta t-respaldos" href="respaldos.html">
+        <span class="croquis-icono" aria-hidden="true">🛟</span>
+        <span class="croquis-nombre">Copias de seguridad</span>
+        <span class="croquis-desc">Descargar una copia de todo y restaurarla si hace falta.</span>
+      </a>
     </div>
+
+    <!-- Ajustes técnicos: discretos a propósito. No son tareas del día a
+         día del negocio, y quien no tenga que tocarlos no debería tropezar
+         con ellos entre las áreas de trabajo. -->
+    <p class="ajustes-linea">
+      <a href="empresa.html">Datos de la empresa</a>
+      <span aria-hidden="true">·</span>
+      <a href="credenciales.html" id="enlaceCredenciales">Conexiones externas (tasa del dólar, pagos)</a>
+      <span aria-hidden="true">·</span>
+      <a href="auditoria.html">Auditoría</a>
+    </p>
   </main>
 
   <script src="js/api.js"></script>
   <script src="js/sonidos.js"></script>
+  <script src="js/avisos.js"></script>
   <script src="js/admin.js"></script>
 </body>
 </html>

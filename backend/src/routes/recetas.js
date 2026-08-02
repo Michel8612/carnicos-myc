@@ -14,6 +14,7 @@
 import { Router } from 'express';
 import db from '../db/index.js';
 import { requiereSesion } from '../middleware/auth.js';
+import { crearNotificacion, marcarLeidaPorReferencia } from './notificaciones.js';
 import { anotar } from '../libro.js';
 
 const router = Router();
@@ -403,6 +404,19 @@ router.post('/:id/producir', async (req, res) => {
     return res.status(400).json({ error: err.message });
   }
 
+  // Aviso al almacén: lo producido queda PENDIENTE de que un almacenero le
+  // dé entrada. Sin este aviso, el producto se queda esperando en la lista
+  // de disponibles hasta que alguien se acuerda de mirarla.
+  await crearNotificacion({
+    tipo: 'produccion_recibida',
+    titulo: `Producción lista: ${receta.nombre}`,
+    mensaje: `El área de cocina produjo ${cantidadProducida} ${receta.rinde_unidad || ''}. Falta darle entrada en el almacén.`,
+    severidad: 'aviso',
+    destino_rol: 'almacen',
+    referencia_tipo: 'produccion',
+    referencia_id: resultado.prodId,
+  }).catch(() => {});
+
   // Que el contador lo vea: la cocina consumió materia prima por este valor.
   // El consumo ahora es real (se descontó el almacén arriba); se guarda el
   // valor consumido igual que antes (no se convierte en "costo" del libro:
@@ -528,6 +542,13 @@ router.post('/disponibles/:id/al-almacen', async (req, res) => {
   });
 
   await tx();
+
+  // El aviso ya no tiene sentido: la entrada está dada.
+  await marcarLeidaPorReferencia({
+    referencia_tipo: 'produccion',
+    referencia_id: disponible.produccion_id,
+    usuario_id: req.usuario.id,
+  }).catch(() => {});
 
   const almacen = await db.prepare('SELECT nombre FROM almacenes WHERE id = ?').get(almacenId);
   await anotar({

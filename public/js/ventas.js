@@ -6,8 +6,12 @@
 //  NO depende del almacén (son áreas distintas).
 //
 //  Durante el día anota lo VENDIDO de cada producto y ve al momento
-//  su total y su ganancia. Al pulsar "Reiniciar jornada" se descuenta
-//  lo vendido de la cantidad y todo pasa al libro de Contabilidad.
+//  su total y su ganancia. Al pulsar "Cierre diario" (antes decía
+//  "Reiniciar jornada": mismo botón, texto más claro) se descuenta lo
+//  vendido de la cantidad y todo pasa al libro de Contabilidad. El
+//  endpoint que se llama sigue siendo /reiniciar a propósito (ver el
+//  comentario en routes/ventas.js). Cada cierre queda además en
+//  "Cierres anteriores" (pestaña Historial).
 //  Los productos que quedan en cero se pueden eliminar con la ✕.
 // ============================================================
 
@@ -57,6 +61,7 @@ function lineaUsd(precioCup) {
 const ventasCarrito = (datos) => apiFetch('/ventas/carrito', { method: 'POST', body: JSON.stringify(datos) });
 const ventasHistorial = () => apiFetch('/ventas/historial');
 const ventasHistorialBorrar = (id) => apiFetch(`/ventas/historial/${id}`, { method: 'DELETE' });
+const ventasCierres = () => apiFetch('/ventas/cierres');
 
 document.getElementById('fechaHoy').textContent = new Date().toLocaleDateString('es-CU', { weekday: 'long', day: 'numeric', month: 'long' });
 
@@ -181,13 +186,19 @@ async function eliminar(id, nombre) {
   catch (e) { alert(e.message); }
 }
 
-// ---- Reiniciar jornada ----
+// ---- Cierre diario ----
+// (el botón decía "Reiniciar jornada"; el endpoint que llama sigue
+// siendo /reiniciar, ver el comentario en routes/ventas.js).
 document.getElementById('btnReiniciar').addEventListener('click', async () => {
-  if (!confirm('¿Reiniciar la jornada?\n\nSe descuenta lo vendido de la cantidad, queda registrado en Contabilidad y el conteo de vendido vuelve a cero.')) return;
+  if (!confirm('¿Hacer el cierre diario?\n\nSe descuenta lo vendido de la cantidad, queda registrado en Contabilidad y el conteo de vendido vuelve a cero.')) return;
   try {
     const r = await API.ventasReiniciar(verUsuarioId ? { usuario_id: verUsuarioId } : {});
-    alert(`Jornada cerrada.\n\nVenta: ${money(r.total_dinero)}\nCosto: ${money(r.total_costo)}\nGanancia: ${money(r.total_ganancia)}\n\nYa aparece en Contabilidad.`);
+    alert(`Cierre diario hecho.\n\nVenta: ${money(r.total_dinero)}\nCosto: ${money(r.total_costo)}\nGanancia: ${money(r.total_ganancia)}\n\nYa aparece en Contabilidad.`);
     await cargar();
+    // Si el vendedor está mirando "Cierres anteriores", que el que
+    // acaba de hacer aparezca de una vez, sin tener que cambiar de
+    // pestaña y volver.
+    if (document.getElementById('pHistorial').classList.contains('activo')) await cargarCierres();
   } catch (e) { alert(e.message); }
 });
 
@@ -238,7 +249,7 @@ const panelesVista = document.querySelectorAll('.panel-vista');
 function cambiarVista(panelId) {
   tabsVentas.querySelectorAll('button').forEach((b) => b.classList.toggle('tv-activo', b.dataset.panel === panelId));
   panelesVista.forEach((p) => p.classList.toggle('activo', p.id === panelId));
-  if (panelId === 'pHistorial') cargarHistorial();
+  if (panelId === 'pHistorial') { cargarHistorial(); cargarCierres(); }
 }
 tabsVentas.querySelectorAll('button').forEach((b) => {
   b.addEventListener('click', () => cambiarVista(b.dataset.panel));
@@ -630,6 +641,42 @@ async function borrarHistorial(id) {
   } catch (e) {
     alert('No se pudo borrar: ' + e.message);
   }
+}
+
+// ============================================================
+//  Cierres anteriores ("Cierre diario"): fecha, total vendido y quién
+//  lo cerró. Lee GET /ventas/cierres, que a su vez lee la línea-resumen
+//  que deja cada cierre en el libro de Contabilidad (ver el comentario
+//  en routes/ventas.js, sección "Cierre diario").
+// ============================================================
+const cierresBody = document.getElementById('cierresBody');
+const cierresVacio = document.getElementById('cierresVacio');
+
+async function cargarCierres() {
+  if (!cierresBody) return;
+  let filas = [];
+  try {
+    filas = await ventasCierres();
+  } catch (e) {
+    cierresBody.innerHTML = '';
+    cierresVacio.style.display = 'block';
+    cierresVacio.textContent = 'No se pudo cargar: ' + e.message;
+    return;
+  }
+
+  if (!filas.length) {
+    cierresBody.innerHTML = '';
+    cierresVacio.style.display = 'block';
+    cierresVacio.textContent = 'Todavía no hay cierres registrados.';
+    return;
+  }
+  cierresVacio.style.display = 'none';
+  cierresBody.innerHTML = filas.map((c) => `
+    <tr>
+      <td>${new Date(c.fecha).toLocaleString('es-CU', { dateStyle: 'medium', timeStyle: 'short' })}</td>
+      <td>${money(c.total_vendido)}</td>
+      <td>${c.usuario_nombre || ''}</td>
+    </tr>`).join('');
 }
 
 // La tasa se carga en paralelo con la hoja de ventas (una sola vez por

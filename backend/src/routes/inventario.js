@@ -81,14 +81,85 @@ router.get('/productos', async (req, res) => {
 });
 
 // Crear producto nuevo (el dueño amplía su catálogo sin tocar código).
+//
+// Además, de forma OPCIONAL, acepta ya una cantidad inicial: si vienen
+// `cantidad` y `almacen_id`, en la MISMA transacción se crea el producto
+// y se registra una ENTRADA por esa cantidad — el mismo camino que sigue
+// una entrada normal (POST /movimientos, tipo 'entrada'), para que quede
+// en el historial de movimientos como lo que es y no como un atajo que
+// mete existencia sin dejar rastro. Si no vienen, el producto se crea
+// exactamente igual que siempre, sin existencia (el flujo de antes no
+// cambia en nada).
 router.post('/productos', async (req, res) => {
   const { nombre, tipo, categoria, unidad_id, precio_costo, precio_venta, stock_minimo } = req.body;
+  const { almacen_id } = req.body;
   if (!nombre || !tipo) return res.status(400).json({ error: 'Indique nombre y tipo del producto.' });
-  const r = await db.prepare(`
-    INSERT INTO productos (nombre, tipo, categoria, unidad_id, precio_costo, precio_venta, stock_minimo)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(nombre, tipo, categoria || null, unidad_id || null, precio_costo || 0, precio_venta || 0, stock_minimo || 0);
-  res.json({ id: r.lastInsertRowid });
+
+  const cantidadInicial = Number(req.body.cantidad) || 0;
+  if (cantidadInicial > 0) {
+    if (!almacen_id) {
+      return res.status(400).json({ error: 'Indique el almacén de la cantidad inicial.' });
+    }
+    // Mismo límite que ya aplica en POST /movimientos: un almacenero
+    // solo puede meter existencia en SU propio almacén.
+    const limiteAlmacen = almacenDeLaSesion(req);
+    if (limiteAlmacen && Number(almacen_id) !== Number(limiteAlmacen)) {
+      return res.status(403).json({ error: 'Solo puede dar entrada en su propio almacén.' });
+    }
+  }
+
+  let productoId = null;
+  const tx = db.transaction(async () => {
+    const r = await db.prepare(`
+      INSERT INTO productos (nombre, tipo, categoria, unidad_id, precio_costo, precio_venta, stock_minimo)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(nombre, tipo, categoria || null, unidad_id || null, precio_costo || 0, precio_venta || 0, stock_minimo || 0);
+    productoId = r.lastInsertRowid;
+
+    if (cantidadInicial > 0) {
+      await db.prepare(`
+        INSERT INTO movimientos (producto_id, almacen_id, tipo, cantidad, origen_tipo, usuario_id, nota)
+        VALUES (?, ?, 'entrada', ?, 'manual', ?, ?)
+      `).run(productoId, almacen_id, cantidadInicial, req.usuario.id, 'Alta de producto con cantidad inicial');
+      await moverExistencia(productoId, almacen_id, cantidadInicial);
+    }
+  });
+
+  try {
+    await tx();
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+
+  // Fuera de la transacción (mismo patrón que POST /movimientos): dejar
+  // el mismo rastro en el libro de Contabilidad que deja cualquier
+  // entrada normal, para que el contador la vea igual que a cualquier
+  // otra.
+  if (cantidadInicial > 0) {
+    const [alm, unidadInfo] = await Promise.all([
+      db.prepare('SELECT nombre FROM almacenes WHERE id = ?').get(almacen_id),
+      unidad_id ? db.prepare('SELECT abreviatura FROM unidades WHERE id = ?').get(unidad_id) : null,
+    ]);
+    const valor = Number((cantidadInicial * (Number(precio_costo) || 0)).toFixed(2));
+    await anotar({
+      tipo: 'almacen',
+      concepto: `Entrada de almacén — ${nombre}`,
+      producto: nombre,
+      cantidad: cantidadInicial,
+      unidad: unidadInfo?.abreviatura || null,
+      // Igual que en POST /movimientos: mover mercancía no es ganancia
+      // ni pérdida, así que costo/ingreso van en cero y el valor queda
+      // solo de referencia.
+      costo: 0,
+      ingreso: 0,
+      valor,
+      area: 'almacen',
+      usuario: req.usuario,
+      nota: [alm?.nombre, 'Alta de producto con cantidad inicial'].filter(Boolean).join(' · '),
+    });
+  }
+
+  res.json({ id: productoId });
 });
 
 // Editar un producto existente.

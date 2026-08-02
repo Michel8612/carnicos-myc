@@ -52,6 +52,9 @@
     .modal-acc button { flex:1; padding:12px; border:none; border-radius:8px; cursor:pointer; font-size:15px; }
     .b-cancelar { background:#e0e0e0; color:#333; } .b-guardar { background:#2196F3; color:#fff; }
     .modal-err { color:#d32f2f; background:#ffebee; border:1px solid #ffcdd2; border-radius:6px; padding:8px; margin-top:10px; font-size:14px; display:none; }
+    /* "Cierres anteriores" (historial de "Cierre diario"), en la pestaña Historial */
+    .cierres-caja { background:#fff; border-radius:12px; padding:14px 16px; box-shadow:0 3px 10px rgba(0,0,0,.12); margin-bottom:22px; }
+    .cierres-caja h2 { margin:0 0 10px; color:#1976D2; font-size:17px; text-align:center; }
   </style>
 </head>
 
@@ -84,7 +87,7 @@
     <section class="panel-vista activo" id="pHoja">
       <div class="acciones-top">
         <button class="btn-add-prod" id="btnAgregarProd">+ Agregar producto</button>
-        <button class="btn-reiniciar" id="btnReiniciar">Reiniciar jornada</button>
+        <button class="btn-reiniciar" id="btnReiniciar">Cierre diario</button>
       </div>
 
       <div class="tarjetas">
@@ -112,7 +115,7 @@
           <tbody id="hojaBody"></tbody>
         </table>
       </div>
-      <p class="ayuda">Los datos se guardan solos al salir de cada casilla. “Reiniciar jornada” descuenta lo vendido de la cantidad y lo envía a Contabilidad.</p>
+      <p class="ayuda">Los datos se guardan solos al salir de cada casilla. “Cierre diario” descuenta lo vendido de la cantidad y lo envía a Contabilidad.</p>
 
       <div id="vacioHoja" class="vacio-vta" style="display:none;">
         Todavía no tiene productos. Use “+ Agregar producto” para armar su lista de venta.
@@ -169,6 +172,23 @@
 
     <!-- ===================== VISTA: HISTORIAL ===================== -->
     <section class="panel-vista" id="pHistorial">
+      <!-- Cierres anteriores: un renglón por cada "Cierre diario" hecho
+           (ver POST /ventas/reiniciar y GET /ventas/cierres). Es el
+           historial visible del cierre que pidió el cliente: fecha,
+           total vendido y quién lo cerró. -->
+      <div class="cierres-caja">
+        <h2>Cierres anteriores</h2>
+        <div class="tabla-scroll">
+          <table class="hist-tabla">
+            <thead>
+              <tr><th>Fecha</th><th>Total vendido</th><th>Cerrado por</th></tr>
+            </thead>
+            <tbody id="cierresBody"></tbody>
+          </table>
+        </div>
+        <p id="cierresVacio" class="vacio-vta" style="display:none;">Todavía no hay cierres registrados.</p>
+      </div>
+
       <div class="historial-lista" id="historialLista"></div>
       <div id="historialVacio" class="vacio-vta" style="display:none;">
         Todavía no hay ventas registradas.
@@ -271,6 +291,7 @@
 
   <script src="js/api.js"></script>
   <script src="js/sonidos.js"></script>
+  <script src="js/avisos.js"></script>
   <script src="js/tasas.js"></script>
   <script src="js/ventas.js"></script>
 </body>

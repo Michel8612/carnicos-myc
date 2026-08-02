@@ -46,6 +46,7 @@ productoForm.addEventListener('submit', (e) => {
   const precio_costo = parseFloat(document.getElementById('precioCosto').value) || 0;
   const precioVentaVal = document.getElementById('precioVenta').value;
   const stockMinimoVal = document.getElementById('stockMinimo').value;
+  const cantidadInicialVal = document.getElementById('cantidadInicial').value;
 
   const datos = {
     nombre,
@@ -55,6 +56,24 @@ productoForm.addEventListener('submit', (e) => {
     precio_venta: precioVentaVal ? parseFloat(precioVentaVal) : 0,
     stock_minimo: stockMinimoVal ? parseFloat(stockMinimoVal) : 0,
   };
+
+  // Cantidad inicial (opcional): si se indica, hay que decir también en
+  // qué almacén entra. Si el usuario no puede elegir (un solo almacén
+  // disponible — ver actualizarSelectorAltaAlmacen), se usa ese
+  // directamente sin pedírselo.
+  const cantidadInicial = cantidadInicialVal ? parseFloat(cantidadInicialVal) : 0;
+  if (cantidadInicial > 0) {
+    const selAlmacen = document.getElementById('altaAlmacen');
+    const almacenId = (selAlmacen && !selAlmacen.classList.contains('hidden'))
+      ? Number(selAlmacen.value)
+      : Number(almacenesDisponibles[0]?.id);
+    if (!almacenId) {
+      alert('Indique en qué almacén entra la cantidad inicial.');
+      return;
+    }
+    datos.cantidad = cantidadInicial;
+    datos.almacen_id = almacenId;
+  }
 
   API.crearProducto(datos)
     .then(() => {
@@ -426,17 +445,43 @@ function cargarUnidades() {
   }).catch((error) => console.error('Error al cargar unidades:', error));
 }
 
+// Última lista de almacenes cargada. La usa el selector de "Cantidad
+// inicial" del alta de producto para saber si hay que ofrecer elegir
+// almacén o no: API.almacenes() ya le devuelve solo el suyo a un
+// almacenero limitado (ver almacenDeLaSesion en el backend), así que
+// "puede elegir almacén" equivale simplemente a "hay más de uno aquí".
+let almacenesDisponibles = [];
+
 // Cargar almacenes (para el selector de movimiento y el contador).
 // El selector de DESTINO (almacenes + vendedores) se llena aparte con
 // cargarDestinos(), cada vez que se abre el bloque de destino.
 function cargarAlmacenes() {
   return API.almacenes().then((almacenes) => {
+    almacenesDisponibles = almacenes || [];
     movAlmacenSelect.innerHTML = (almacenes || [])
       .map((a) => `<option value="${a.id}">${a.nombre}</option>`)
       .join('');
     contadorAlmacenes.textContent = `${(almacenes || []).length} almacenes`;
+    actualizarSelectorAltaAlmacen();
     return almacenes;
   }).catch((error) => console.error('Error al cargar almacenes:', error));
+}
+
+// El selector de almacén del alta de producto solo se muestra si hay
+// más de uno para elegir. Si el usuario está limitado a un único
+// almacén, no tiene sentido preguntarle: se usa ese directamente (ver
+// el submit de productoForm).
+function actualizarSelectorAltaAlmacen() {
+  const sel = document.getElementById('altaAlmacen');
+  if (!sel) return;
+  if (almacenesDisponibles.length > 1) {
+    sel.innerHTML = '<option value="">Almacén para la cantidad inicial</option>' +
+      almacenesDisponibles.map((a) => `<option value="${a.id}">${a.nombre}</option>`).join('');
+    sel.classList.remove('hidden');
+  } else {
+    sel.innerHTML = '';
+    sel.classList.add('hidden');
+  }
 }
 
 // Cargar productos (para el selector de movimiento)
