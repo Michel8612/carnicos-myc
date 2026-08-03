@@ -22,14 +22,21 @@ real, más una comprobación de solo lectura de las nueve rutas nuevas y una des
 de Excel de verdad desde la nube. Lo único que queda son las gestiones que dependen
 del cliente (punto 4).
 
-> ⚠️ **HAY UN DATO DISPARATADO EN LA BASE DEL CLIENTE.** El libro tiene una venta
-> registrada por **147 000 000 CUP** («Venta — Cliente»), casi con seguridad un
-> error de tecleo, y 4 movimientos bancarios de 2 500 llamados «Cobro de prueba».
-> Por eso el estado de resultados de los últimos 30 días da 130 millones de utilidad.
-> **El cálculo es correcto: cuadra al céntimo con el libro.** No se borró nada porque
-> son registros del cliente. **Hay que enseñárselo antes de que vea los informes**, o
-> pensará que el sistema está roto. Se corrige desde Contabilidad → Libro (la ✕) y
-> desde Bancos.
+**La base de producción se dejó EN BLANCO** el 3 de agosto para entregársela al
+cliente. Con esto desapareció también la venta disparatada de 147 000 000 CUP que
+tenía el libro (era un error de tecleo y deformaba todos los informes).
+
+- Se hizo con el propio botón de restaurar de la aplicación, mandándole un respaldo
+  con las tablas de operación vacías. Nada de SQL por fuera.
+- **Sobrevive solo `admin` / `admin123`.** Los usuarios Kevin y lolo se borraron: el
+  cliente crea su propio personal. **Lo primero que debe hacer es cambiar esa clave.**
+- Se conservó la configuración de fábrica: 14 categorías de gasto, 10 unidades, el
+  «Almacén principal», los parámetros de tributación y los documentos legales. Sin
+  las categorías de gasto la tributación dejaría de calcular.
+- Catálogo, ventas, libro, almacén, bancos y datos fiscales quedaron a cero.
+- La copia de antes de limpiar está en el scratchpad de la sesión
+  (`respaldo-produccion-antes-de-limpiar.json`, 218 KB). **No está en el repo**: si
+  hace falta conservarla, hay que moverla a sitio seguro antes de que se borre.
 
 Aviso de entorno: la base de pruebas pasó del **5433** al **5544**. Windows metió
 el rango 5433-5532 en sus puertos reservados y el contenedor dejó de arrancar
@@ -282,6 +289,17 @@ La conexión falla a menudo (Cuba): **reintentar varias veces**, no es error del
   de cobro. Los cobros de documentos van aparte a propósito (ver punto 2).
 - **Sin empaquetar como aplicación de teléfono.** El `capacitor.config.json` está, pero no se
   ha generado ni probado ningún APK.
+- **⚠️ RESTAURAR UN RESPALDO BORRA LA AUDITORÍA — y el sistema dice que no.**
+  `respaldos.js` excluye `auditoria` de la lista a restaurar y responde «La tabla de
+  auditoría no se tocó», pero `auditoria.usuario_id` (y `autorizado_por`) tienen llave
+  foránea a `usuarios`, así que el `TRUNCATE ... CASCADE` la arrastra igual. Comprobado
+  el 3 de agosto al limpiar producción: pasó de 78 registros a 2.
+  **Consecuencia real: cualquiera con la clave del dueño puede borrar el rastro de
+  auditoría restaurando un respaldo**, que es justo lo que el diseño promete impedir.
+  Arreglo correcto: quitarle a `auditoria` esas dos llaves foráneas — ya guarda
+  `usuario_nombre` precisamente para sobrevivir al borrado de un usuario. Ojo: hay que
+  hacerlo con un `ALTER TABLE`, porque `schema.sql` usa `CREATE TABLE IF NOT EXISTS` y
+  no modifica tablas que ya existen. **Pendiente de decidir.**
 - **Sin probar: EnZona real.** El mapeo de su respuesta está aislado en una sola función
   marcada como no verificada, para corregirlo en un único sitio cuando lleguen credenciales.
 
