@@ -16,11 +16,20 @@
 probados en local: **10 baterías, 0 fallas**, incluida la regresión completa de
 todo lo anterior.
 
-**Lo que falta para entregar es desplegar** (punto 6) y las gestiones que dependen
-del cliente (punto 4). No hay nada a medias en el código.
+**DESPLEGADO Y PROBADO CONTRA PRODUCCIÓN** el 2 de agosto por la noche
+(commit `20a2b29`, subido a GitHub): 45/45 de la batería principal contra la URL
+real, más una comprobación de solo lectura de las nueve rutas nuevas y una descarga
+de Excel de verdad desde la nube. Lo único que queda son las gestiones que dependen
+del cliente (punto 4).
 
-> ⚠️ **Este trabajo NO está desplegado todavía.** Producción sigue con la entrega
-> del 2 de agosto por la mañana. Nada de esto está subido a git ni a Netlify.
+> ⚠️ **HAY UN DATO DISPARATADO EN LA BASE DEL CLIENTE.** El libro tiene una venta
+> registrada por **147 000 000 CUP** («Venta — Cliente»), casi con seguridad un
+> error de tecleo, y 4 movimientos bancarios de 2 500 llamados «Cobro de prueba».
+> Por eso el estado de resultados de los últimos 30 días da 130 millones de utilidad.
+> **El cálculo es correcto: cuadra al céntimo con el libro.** No se borró nada porque
+> son registros del cliente. **Hay que enseñárselo antes de que vea los informes**, o
+> pensará que el sistema está roto. Se corrige desde Contabilidad → Libro (la ✕) y
+> desde Bancos.
 
 Aviso de entorno: la base de pruebas pasó del **5433** al **5544**. Windows metió
 el rango 5433-5532 en sus puertos reservados y el contenedor dejó de arrancar
@@ -39,7 +48,7 @@ por si hiciera falta. TREBOL (`D:\TREBOL`) está en el 5434, así que no chocan.
 | App en producción | https://carnicos-myc-gestion.netlify.app |
 | Repositorio | https://github.com/Michel8612/carnicos-myc (**público**) |
 | Base de datos | Neon (PostgreSQL), proyecto `withered-sunset-27343021` |
-| Último commit desplegado | `e7c6604` — ERP fase 1 |
+| Último commit desplegado | `20a2b29` — sección 10 completa (2 ago, noche) |
 
 **Acceso:** `admin` / `admin123`
 
@@ -131,14 +140,15 @@ porque leía `total` y el servidor devuelve `sin_leer`.
 
 ## 3. Qué falta para entregar
 
-El código está terminado. Lo que queda no es programar:
+El código está terminado y desplegado. Lo que queda no es programar:
 
-1. **Desplegar** (punto 6). Es el único paso que separa esto de estar en manos del cliente.
-   Nada de la segunda entrega está en producción todavía.
-2. **Probar contra la nube** después de desplegar:
-   `BASE=https://carnicos-myc-gestion.netlify.app/api node pruebas/test-fase1.mjs`
-   Ya pasó una vez que una venta fallara solo en producción.
-3. **Las gestiones del punto 4**, que dependen del cliente y no se pueden adelantar aquí.
+1. **Enseñarle al cliente la venta de 147 000 000** (ver el aviso del punto 0) y que decida
+   si la corrige. Mientras esté ahí, todos los informes salen deformados.
+2. **Las gestiones del punto 4**, que dependen del cliente y no se pueden adelantar aquí.
+3. **Recorrer las pantallas nuevas con el cliente delante.** Están probadas por API y
+   revisadas de forma estática (que no llamen a métodos inexistentes, que los elementos
+   existan, que no haya `return` suelto), pero **nadie las ha recorrido clic a clic**.
+4. **Decidir el plan de Neon** y cada cuánto se pulsará el botón de copia de seguridad.
 
 Y conviene saber, antes de prometerle nada al cliente sobre "funcionar para siempre":
 
