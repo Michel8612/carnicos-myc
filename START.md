@@ -152,10 +152,15 @@ El código está terminado y desplegado. Lo que queda no es programar:
 
 Y conviene saber, antes de prometerle nada al cliente sobre "funcionar para siempre":
 
-- **La base de datos (Neon) y el hosting (Netlify) son gratuitos.** Funcionan, pero el plan
-  gratis de Neon **suspende la base por inactividad** y puede archivarla si pasa mucho
-  tiempo sin uso; la primera petición del día tarda más por eso. Si el negocio va a
-  depender de esto a diario, hay que decidir con el cliente si se pasa a un plan de pago.
+- **La base de datos (Neon) y el hosting (Netlify) son gratuitos, y para este negocio
+  el plan gratis basta.** La base se duerme a los **5 minutos** sin uso, pero **despierta
+  en décimas de segundo**: no se nota. El archivado a almacenamiento frío solo ocurre tras
+  14 días de vida y 24 h sin tocarla, y se deshace solo al entrar. **No se pierde nada.**
+  Lo que sí hay que vigilar son los dos topes reales del plan gratis: **0,5 GB de
+  almacenamiento** y **100 horas de cómputo al mes** (unas 13 h de uso activo al día).
+  Revisar el consumo tras un mes de uso real. Si se queda corto, el plan Launch es por uso
+  (0,106 USD/hora de cómputo + 0,35 USD/GB al mes): entre 9 y 20 USD al mes según se deje
+  dormir la base o no. Consultado el 2 de agosto de 2026 en neon.com/docs/introduction/plans.
 - **No hay copia de seguridad automática.** La pantalla de respaldos existe, pero alguien
   tiene que entrar y pulsar. Merece la pena acordar con el cliente cada cuánto lo hará.
 - **Sobre "compilarlo"**: esto es una aplicación web, no se compila. Se abre desde el
