@@ -1,0 +1,56 @@
+# ============================================================
+#  Cárnicos M&C — instalación en la PC del cliente (SIN INTERNET)
+#
+#  Dos piezas: la base de datos y el programa. Arrancan solas al
+#  encender la PC (restart: unless-stopped) para que el negocio no
+#  dependa de que alguien se acuerde de abrir nada.
+#
+#  Se usa con:  docker compose -f docker-compose.cliente.yml up -d
+#  (el instalador lo hace por usted)
+# ============================================================
+
+services:
+  base-de-datos:
+    image: postgres:16-alpine
+    container_name: carnicos-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: carnicos
+      POSTGRES_PASSWORD: carnicos-local
+      POSTGRES_DB: carnicos
+    volumes:
+      # Aquí viven los datos del negocio. Es un volumen de Docker, no
+      # una carpeta suelta: sobrevive a que se borre el contenedor o
+      # se actualice el programa. Borrarlo es borrar la contabilidad.
+      - carnicos-datos:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U carnicos -d carnicos"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    # La base NO publica puerto al exterior a propósito: solo el
+    # programa habla con ella, por la red interna de Docker. Así no
+    # queda un Postgres abierto en la red del negocio.
+
+  programa:
+    image: carnicos-myc:1.0
+    container_name: carnicos-app
+    restart: unless-stopped
+    depends_on:
+      base-de-datos:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://carnicos:carnicos-local@base-de-datos:5432/carnicos
+      PGSSL: "off"
+      # Clave de firma de las sesiones. El instalador la sustituye por
+      # una distinta en cada cliente: si todas las instalaciones
+      # compartieran la misma, una sesión de un negocio valdría en otro.
+      JWT_SECRETO: CAMBIAR_EN_LA_INSTALACION
+      PUERTO: "3010"
+    ports:
+      # 3080 en la PC del cliente -> 3010 dentro del contenedor.
+      # Se abre en el navegador como http://localhost:3080
+      - "3080:3010"
+
+volumes:
+  carnicos-datos:
