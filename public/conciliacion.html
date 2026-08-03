@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Conciliación de Inventario - Cárnicos M&C</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    /* Página propia (no usa css/almacen.css): se calca el patrón de
+       credenciales.html (cabecera oscura + tarjetas blancas), con su
+       paleta morada porque esta pantalla vive dentro del área de
+       Almacén (ver css/almacen.css: #9c27b0 / #ba68c8). */
+    body.conc-body { margin:0; font-family:Arial, Helvetica, sans-serif; background:linear-gradient(to bottom,#f9f0ff,#e9d9f9); color:#000; }
+    header { text-align:center; padding:18px 20px 20px; background:#37474f; color:#fff; box-shadow:0 2px 6px rgba(0,0,0,.25); }
+    .logo-empresa { width:76px; height:76px; object-fit:contain; display:block; margin:0 auto 8px; background:#fff; border-radius:50%; padding:6px; box-shadow:0 2px 8px rgba(0,0,0,.3); }
+    header h1 { color:#fff; font-size:21px; letter-spacing:.3px; text-shadow:0 1px 3px rgba(0,0,0,.4); margin:8px 0; }
+
+    .conc-wrap { max-width:820px; margin:0 auto; padding:0 12px 60px; }
+    p.sub { margin:0 0 10px; font-size:12.5px; color:#666; }
+
+    .tarjeta { background:#fff; border-radius:12px; padding:16px; box-shadow:0 3px 10px rgba(0,0,0,.12); margin:14px 0; }
+    .tarjeta h2 { margin:0 0 10px; font-size:16px; color:#4a148c; }
+
+    /* Todo pensado para tocar con el dedo, de pie, en el almacén:
+       campos grandes y sin letra pequeña que obligue a hacer zoom. */
+    select, input[type="text"], input[type="number"] {
+      width:100%; box-sizing:border-box; padding:11px 10px; border:1px solid #ccc; border-radius:8px;
+      font-size:16px; font-family:inherit; min-height:44px;
+    }
+    label { display:block; font-size:12.5px; color:#555; margin:8px 0 3px; font-weight:bold; }
+
+    .btn { padding:11px 18px; border:none; border-radius:8px; cursor:pointer; font-size:14.5px; font-weight:bold; min-height:44px; }
+    .btn-morado { background:#9c27b0; color:#fff; } .btn-morado:hover { background:#7b1fa2; }
+    .btn-verde  { background:#2e7d32; color:#fff; } .btn-verde:hover { background:#1b5e20; }
+    .btn-gris   { background:#607d8b; color:#fff; } .btn-gris:hover { background:#455a64; }
+    .btn-rojo   { background:#c62828; color:#fff; } .btn-rojo:hover { background:#b71c1c; }
+    .btn-linea  { background:#fff; color:#4a148c; border:1px solid #ce93d8; }
+    .btn:disabled { opacity:.5; cursor:not-allowed; }
+    .fila-botones { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+
+    .aviso-error { background:#ffebee; color:#c62828; border:1px solid #ffcdd2; border-radius:8px; padding:9px 12px; font-size:13px; margin-top:10px; }
+
+    /* ---- Historial ---- */
+    .hist-fila { display:flex; justify-content:space-between; align-items:center; gap:10px; padding:12px 4px; border-top:1px solid #f0e6f6; cursor:pointer; }
+    .hist-fila:first-child { border-top:none; }
+    .hist-fila:hover { background:#faf3fc; }
+    .hist-info strong { display:block; font-size:14.5px; color:#263238; }
+    .hist-info small { color:#78909c; display:block; margin-top:2px; }
+    .hist-derecha { text-align:right; }
+    .vacio { text-align:center; color:#777; padding:20px; }
+
+    .badge { display:inline-block; padding:3px 10px; border-radius:10px; font-size:11.5px; font-weight:bold; white-space:nowrap; }
+    .b-abierta { background:#fff3e0; color:#e65100; }
+    .b-cerrada { background:#e8f5e9; color:#2e7d32; }
+    .b-anulada { background:#eceff1; color:#607d8b; }
+    .hist-dif { font-size:12px; color:#c62828; margin-top:3px; }
+
+    /* ---- Vista de conteo ---- */
+    #vistaConteo.oculto, #vistaHistorial.oculto { display:none; }
+    .conc-cabecera-info { font-size:13.5px; color:#37474f; line-height:1.6; }
+    .conc-cabecera-info b { color:#4a148c; }
+
+    .resumen-vivo { display:flex; gap:16px; flex-wrap:wrap; background:#f3e5f5; border-radius:10px; padding:10px 14px; margin:12px 0; font-size:13.5px; }
+    .resumen-vivo b { display:block; font-size:18px; color:#4a148c; }
+
+    .tabla-conteo-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+    table.tabla-conteo { width:100%; border-collapse:collapse; font-size:13.5px; min-width:560px; }
+    table.tabla-conteo th { text-align:left; background:#f3e5f5; color:#4a148c; padding:8px 6px; position:sticky; top:0; }
+    table.tabla-conteo td { padding:6px; border-bottom:1px solid #f0e6f6; vertical-align:middle; }
+    table.tabla-conteo td.num { text-align:right; }
+    table.tabla-conteo input { min-width:80px; }
+    .celda-motivo input { min-width:130px; }
+
+    .dif-cero  { color:#607d8b; }
+    .dif-sobra { color:#ef6c00; font-weight:bold; }
+    .dif-falta { color:#c62828; font-weight:bold; }
+
+    .fila-msg { font-size:11px; margin-top:2px; min-height:14px; }
+    .fila-msg.ok { color:#2e7d32; }
+    .fila-msg.malo { color:#c62828; }
+
+    .solo-impresion { display:none; }
+
+    /* ---- Modal "Cerrar conteo": nunca un confirm() a secas, porque
+       aquí hay dos caminos muy distintos (uno toca el almacén, el otro
+       no) y elegir el equivocado por un clic rápido sale caro. ---- */
+    .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.5); display:flex; align-items:flex-end; justify-content:center; z-index:1000; }
+    .modal-overlay.oculto { display:none; }
+    .modal-caja { background:#fff; border-radius:14px 14px 0 0; padding:20px; max-width:480px; width:100%; box-shadow:0 -4px 20px rgba(0,0,0,.3); }
+    @media (min-width:600px) {
+      .modal-overlay { align-items:center; }
+      .modal-caja { border-radius:14px; }
+    }
+    .modal-caja h3 { margin:0 0 10px; color:#4a148c; }
+    .modal-caja p { font-size:14px; color:#37474f; line-height:1.5; }
+    .modal-caja .fila-botones { flex-direction:column; }
+    .modal-caja .btn { width:100%; }
+
+    /* ---- El acta que se firma: solo esto sale al imprimir ---- */
+    .pie-firma { display:none; }
+    @media print {
+      header, .top-nav, .tarjeta-abrir, .fila-botones, .resumen-vivo,
+      .input-contado, .input-motivo, .modal-overlay, #btnSonido, .avisos-caja,
+      #vistaHistorial { display:none !important; }
+      .solo-impresion { display:inline; }
+      .tabla-conteo-wrap { overflow:visible; }
+      table.tabla-conteo { min-width:0; }
+      .pie-firma { display:flex; gap:40px; margin-top:60px; }
+      .firma { flex:1; text-align:center; border-top:1px solid #000; padding-top:6px; font-size:12px; }
+      .fecha-emision { margin-top:20px; font-size:11px; color:#555; text-align:right; }
+    }
+  </style>
+</head>
+
+<body class="conc-body">
+  <header>
+    <img src="img/logo.png" alt="Cárnicos M&C" class="logo-empresa logo-circulo">
+    <h1>Conciliación de Inventario</h1>
+    <div class="top-nav">
+      <a href="#" id="navPanel" style="display:none;">← Panel</a>
+      <a href="#" onclick="logout();return false;">Salir</a>
+    </div>
+  </header>
+
+  <main class="conc-wrap">
+
+    <!-- ============== VISTA 1: HISTORIAL ============== -->
+    <div id="vistaHistorial">
+      <div class="tarjeta tarjeta-abrir">
+        <h2>Abrir nuevo conteo</h2>
+        <p class="sub">Elija el almacén a contar. Se toma como base lo que el sistema tiene EN ESTE MOMENTO: cualquier venta o entrada registrada después de abrir el conteo no altera lo que se está comparando.</p>
+        <label for="selAlmacenAbrir">Almacén</label>
+        <select id="selAlmacenAbrir"></select>
+        <label for="notaAbrir">Nota (opcional)</label>
+        <input type="text" id="notaAbrir" placeholder="Ej: conteo mensual de agosto">
+        <div class="fila-botones">
+          <button type="button" class="btn btn-morado" id="btnAbrirConteo">Abrir conteo</button>
+        </div>
+        <p class="aviso-error" id="errorAbrir" style="display:none;"></p>
+      </div>
+
+      <div class="tarjeta">
+        <h2>Historial de conteos</h2>
+        <div id="listaHistorial"><p class="vacio">Cargando…</p></div>
+      </div>
+    </div>
+
+    <!-- ============== VISTA 2: EL CONTEO ============== -->
+    <div id="vistaConteo" class="oculto">
+      <div class="fila-botones" style="margin-top:14px;">
+        <button type="button" class="btn btn-linea" id="btnVolver">← Volver al historial</button>
+      </div>
+
+      <div class="tarjeta">
+        <h2 id="tituloConteo">Conteo físico</h2>
+        <div class="conc-cabecera-info" id="infoConteo"></div>
+
+        <div class="resumen-vivo" id="resumenVivo">
+          <div>Contadas<b id="resContadas">0 / 0</b></div>
+          <div>Con diferencia<b id="resDiferencias">0</b></div>
+        </div>
+
+        <div class="fila-botones">
+          <button type="button" class="btn btn-verde" id="btnExcel">Excel</button>
+          <button type="button" class="btn btn-verde" id="btnCsv">CSV</button>
+          <button type="button" class="btn btn-gris" id="btnImprimir">Imprimir / PDF</button>
+        </div>
+        <div class="fila-botones" id="accionesConteo">
+          <button type="button" class="btn btn-morado" id="btnCerrarConteo">Cerrar conteo</button>
+          <button type="button" class="btn btn-rojo" id="btnAnularConteo">Anular conteo</button>
+        </div>
+        <p class="aviso-error" id="errorConteo" style="display:none;"></p>
+      </div>
+
+      <div class="tarjeta">
+        <div class="tabla-conteo-wrap">
+          <table class="tabla-conteo">
+            <thead>
+              <tr>
+                <th>Producto</th>
+                <th>Unidad</th>
+                <th class="num">Sistema</th>
+                <th>Contado</th>
+                <th class="num">Diferencia</th>
+                <th>Motivo</th>
+              </tr>
+            </thead>
+            <tbody id="lineasConteo"></tbody>
+          </table>
+        </div>
+
+        <div class="pie-firma">
+          <div class="firma">Contó</div>
+          <div class="firma">Revisó</div>
+        </div>
+        <div class="fecha-emision" id="fechaEmision"></div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Modal de cierre: explica en español llano qué va a pasar antes de
+       dejar elegir entre las dos opciones (ajustar o solo constancia). -->
+  <div class="modal-overlay oculto" id="modalCerrar">
+    <div class="modal-caja">
+      <h3>Cerrar conteo</h3>
+      <p>Las existencias del almacén pasarán a ser las que usted contó. Queda registrado quién lo hizo y por qué.</p>
+      <p><b>Elija cómo cerrarlo:</b></p>
+      <div class="fila-botones">
+        <button type="button" class="btn btn-verde" id="btnCerrarAjustando">Cerrar ajustando las existencias</button>
+        <button type="button" class="btn btn-gris" id="btnCerrarConstancia">Cerrar solo como constancia (no toca el almacén)</button>
+        <button type="button" class="btn btn-linea" id="btnCancelarCerrar">Cancelar</button>
+      </div>
+      <p class="aviso-error" id="errorModalCerrar" style="display:none;"></p>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script src="js/sonidos.js"></script>
+  <script src="js/avisos.js"></script>
+  <script src="js/conciliacion.js"></script>
+</body>
+</html>

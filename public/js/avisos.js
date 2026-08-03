@@ -46,6 +46,8 @@
     .aviso-item small { color:#78909c; }
     .aviso-urgente strong { color:#c62828; }
     .avisos-vacio { padding:14px; text-align:center; color:#90a4ae; font-size:13px; }
+    .avisos-todos { display:block; padding:10px; text-align:center; font-size:13px; font-weight:bold;
+      color:#1565C0; text-decoration:none; border-top:1px solid #eceff1; }
   `;
   document.head.appendChild(estilo);
 
@@ -61,7 +63,10 @@
 
   async function refrescar() {
     try {
-      const { total } = await API.avisosContador();
+      // El servidor devuelve { sin_leer }. Antes aquí se leía `total`,
+      // que no existe: el contador salía siempre indefinido y la
+      // campanita nunca marcaba nada, aunque hubiera avisos.
+      const { sin_leer: total } = await API.avisosContador();
       $cuenta.hidden = !total;
       $cuenta.textContent = total > 99 ? '99+' : total;
     } catch {
@@ -82,17 +87,22 @@
         return;
       }
 
-      $lista.innerHTML = avisos
-        .map(
-          (a) => `
+      // Solo los diez más recientes: la campanita es un vistazo rápido,
+      // no el archivo. Para lo demás está el centro de avisos.
+      $lista.innerHTML =
+        avisos
+          .slice(0, 10)
+          .map(
+            (a) => `
         <div class="aviso-item ${a.leida ? '' : 'nuevo'} ${a.severidad === 'urgente' ? 'aviso-urgente' : ''}"
              data-id="${a.id}" data-tipo="${a.tipo}">
           <strong>${a.titulo}</strong>
           ${a.mensaje ? `<span>${a.mensaje}</span>` : ''}
           <small>${new Date(a.creada_en).toLocaleString('es-CU')}</small>
         </div>`,
-        )
-        .join('');
+          )
+          .join('') +
+        '<a class="avisos-todos" href="avisos.html">Ver todos los avisos</a>';
     } catch (e) {
       $lista.innerHTML = `<p class="avisos-vacio">${e.message}</p>`;
     }

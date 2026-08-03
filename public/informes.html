@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Informes Contables - Cárnicos M&C</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    body.informes-body { margin:0; font-family:Arial, Helvetica, sans-serif; background:linear-gradient(to bottom,#f5f5f5,#e0f7fa); color:#000; }
+    header { text-align:center; padding:18px 20px 20px; background:#37474f; color:#fff; box-shadow:0 2px 6px rgba(0,0,0,.25); }
+    .logo-informes { width:76px; height:76px; object-fit:contain; display:block; margin:0 auto 8px; background:#fff; border-radius:50%; padding:6px; box-shadow:0 2px 8px rgba(0,0,0,.3); }
+    header h1 { color:#fff; font-size:24px; letter-spacing:.5px; text-shadow:0 1px 3px rgba(0,0,0,.4); margin:8px 0; }
+
+    .inf-wrap { max-width:1100px; margin:0 auto; padding:0 12px 40px; }
+    p.sub { margin:10px 0; font-size:12.5px; color:#666; text-align:center; }
+
+    /* Pestañas */
+    .tabs { display:flex; gap:8px; justify-content:center; flex-wrap:wrap; margin:16px 0; }
+    .tabs button { background:#fff; border:1px solid #cfd8dc; color:#37474f; padding:10px 16px; border-radius:20px; cursor:pointer; font-size:14px; }
+    .tabs button.activo { background:#1976D2; color:#fff; border-color:#1976D2; font-weight:bold; }
+    .panel { display:none; } .panel.activo { display:block; }
+
+    /* Filtros de fecha */
+    .filtros { display:flex; gap:10px; flex-wrap:wrap; align-items:end; background:#fff; padding:12px; border-radius:10px; box-shadow:0 3px 10px rgba(0,0,0,.08); margin-bottom:12px; }
+    .filtros label { display:block; font-size:12px; color:#555; margin-bottom:3px; }
+    .filtros input { padding:8px; border:1px solid #cfd8dc; border-radius:8px; font-size:14px; }
+    .filtros button { padding:9px 16px; border:none; border-radius:8px; cursor:pointer; font-size:14px; background:#1976D2; color:#fff; font-weight:bold; }
+
+    /* Botones de descarga/impresión */
+    .botones-informe { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+    .botones-informe button { padding:9px 14px; border:none; border-radius:8px; cursor:pointer; font-size:13.5px; font-weight:bold; color:#fff; }
+    .b-excel { background:#2e7d32; } .b-excel:hover { background:#1b5e20; }
+    .b-csv { background:#00897b; } .b-csv:hover { background:#00695c; }
+    .b-imprimir { background:#607d8b; } .b-imprimir:hover { background:#455a64; }
+    .aviso-error { color:#c62828; font-size:12.5px; margin:0 0 10px; min-height:16px; }
+
+    /* Tarjetas resumen */
+    .tarjetas { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin:14px 0; }
+    .tarjeta { background:#fff; border-radius:12px; padding:14px; text-align:center; box-shadow:0 3px 10px rgba(0,0,0,.1); }
+    .tarjeta .n { font-size:20px; font-weight:bold; }
+    .tarjeta .l { font-size:12px; color:#666; margin-top:3px; }
+    .c-azul .n{color:#1565C0} .c-rojo .n{color:#c62828} .c-verde .n{color:#2e7d32}
+    .c-morado .n{color:#6a1b9a} .c-naranja .n{color:#e65100} .c-gris .n{color:#455a64}
+
+    /* La "hoja" del informe: lo único que se imprime */
+    .hoja-informe { background:#fff; border-radius:12px; padding:16px; box-shadow:0 3px 10px rgba(0,0,0,.1); margin-top:8px; }
+    .hoja-informe h2 { margin:0 0 4px; color:#283593; font-size:18px; }
+    .negocio-nombre { margin:0 0 2px; font-weight:bold; color:#37474f; }
+    .periodo-txt { margin:0 0 12px; font-size:13px; color:#666; }
+    .nota-informe { background:#fff8e1; border:1px solid #ffca28; color:#7a5c00; border-radius:8px; padding:8px 12px; font-size:12.5px; margin:0 0 12px; }
+
+    .tabla-scroll { overflow-x:auto; margin-top:6px; }
+    table.datos { width:100%; border-collapse:collapse; min-width:420px; }
+    table.datos th { background:#c5cae9; padding:9px 8px; font-size:12.5px; text-align:left; }
+    table.datos th.der { text-align:right; }
+    table.datos td { border-top:1px solid #eceff1; padding:8px; font-size:13.5px; }
+    table.datos td.izq { text-align:left; }
+    table.datos td.der { text-align:right; }
+    tr.fila-seccion td { background:#e8eaf6; font-weight:bold; color:#283593; padding-top:12px; }
+    tr.fila-total td { font-weight:bold; background:#f5f5f5; border-top:2px solid #9fa8da; }
+    .neg { color:#c62828; font-weight:bold; }
+    .vacio { text-align:center; color:#777; padding:20px; }
+    .pie-impresion { margin:14px 0 0; font-size:11.5px; color:#999; text-align:right; }
+
+    h3.seccion { margin:22px 0 4px; color:#283593; font-size:15.5px; }
+
+    @media (max-width:600px) {
+      .filtros { flex-direction:column; align-items:stretch; }
+    }
+
+    /* ============================================================
+       IMPRESIÓN (esto es el PDF: Ctrl+P → "Guardar como PDF")
+       Se oculta todo lo que no es el informe en sí: cabecera,
+       navegación, pestañas, filtros, botones y avisos flotantes. Solo
+       queda el título, el nombre del negocio, el período, la tabla y
+       el pie con la fecha de emisión.
+       ============================================================ */
+    @media print {
+      header, .top-nav, .tabs, .filtros, .botones-informe, p.sub, .nota-informe,
+      .aviso-error, .tarjetas, .avisos-caja, #btnSonido {
+        display: none !important;
+      }
+      body { background:#fff; }
+      .inf-wrap { max-width:none; padding:0; margin:0; }
+      .hoja-informe { box-shadow:none; padding:0; margin:0; }
+      table.datos th { background:#eee !important; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+      tr.fila-seccion td, tr.fila-total td { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+    }
+  </style>
+</head>
+
+<body class="informes-body">
+  <header>
+    <img src="img/logo.png" alt="Cárnicos M&C" class="logo-informes">
+    <h1>Informes Contables</h1>
+    <div class="top-nav">
+      <a href="#" id="navPanel" style="display:none;">← Panel</a>
+      <a href="#" onclick="logout();return false;">Salir</a>
+    </div>
+  </header>
+
+  <main class="inf-wrap">
+    <p class="sub">
+      Para guardar cualquiera de estos informes como PDF: pulse "Imprimir / PDF" y, en el cuadro de
+      impresión del navegador, elija "Guardar como PDF".
+    </p>
+
+    <div class="tabs">
+      <button class="activo" data-panel="pEstado">Estado de resultados</button>
+      <button data-panel="pBalance">Balance general</button>
+      <button data-panel="pFlujo">Flujo de caja</button>
+    </div>
+
+    <!-- ============ ESTADO DE RESULTADOS ============ -->
+    <section class="panel activo" id="pEstado">
+      <div class="filtros">
+        <div><label>Desde</label><input type="date" id="erDesde"></div>
+        <div><label>Hasta</label><input type="date" id="erHasta"></div>
+        <button type="button" id="erVer">Ver</button>
+      </div>
+      <div class="botones-informe">
+        <button type="button" class="b-excel" id="erExcel">⬇ Excel</button>
+        <button type="button" class="b-csv" id="erCsv">⬇ CSV</button>
+        <button type="button" class="b-imprimir" id="erImprimir">🖶 Imprimir / PDF</button>
+      </div>
+      <p class="aviso-error" id="erAviso"></p>
+
+      <div class="tarjetas">
+        <div class="tarjeta c-azul"><div class="n" id="erIngresos">0.00</div><div class="l">Ingresos totales</div></div>
+        <div class="tarjeta c-rojo"><div class="n" id="erCosto">0.00</div><div class="l">Costo de ventas</div></div>
+        <div class="tarjeta c-verde"><div class="n" id="erUtilBruta">0.00</div><div class="l">Utilidad bruta</div></div>
+        <div class="tarjeta c-naranja"><div class="n" id="erGastos">0.00</div><div class="l">Gastos de operación</div></div>
+        <div class="tarjeta c-morado"><div class="n" id="erUtilNeta">0.00</div><div class="l">Utilidad neta</div></div>
+      </div>
+
+      <div class="hoja-informe">
+        <h2>Estado de Resultados</h2>
+        <p class="negocio-nombre">Cárnicos M&C</p>
+        <p class="periodo-txt" id="erPeriodoTxt">Período: —</p>
+        <div class="tabla-scroll">
+          <table class="datos">
+            <thead><tr><th>Concepto</th><th class="der">Importe (CUP)</th></tr></thead>
+            <tbody id="erTbody"><tr><td colspan="2" class="vacio">Pulse "Ver" para cargar el informe.</td></tr></tbody>
+          </table>
+        </div>
+        <p class="pie-impresion">Emitido el <span class="fecha-emision"></span></p>
+      </div>
+    </section>
+
+    <!-- ============ BALANCE GENERAL ============ -->
+    <section class="panel" id="pBalance">
+      <div class="filtros">
+        <div><label>Fecha de corte</label><input type="date" id="balFecha"></div>
+        <button type="button" id="balVer">Ver</button>
+      </div>
+      <div class="botones-informe">
+        <button type="button" class="b-excel" id="balExcel">⬇ Excel</button>
+        <button type="button" class="b-csv" id="balCsv">⬇ CSV</button>
+        <button type="button" class="b-imprimir" id="balImprimir">🖶 Imprimir / PDF</button>
+      </div>
+      <p class="aviso-error" id="balAviso"></p>
+
+      <div class="tarjetas">
+        <div class="tarjeta c-azul"><div class="n" id="balActivoTotal">0.00</div><div class="l">Total activo</div></div>
+        <div class="tarjeta c-rojo"><div class="n" id="balPasivoTotal">0.00</div><div class="l">Total pasivo</div></div>
+        <div class="tarjeta c-verde"><div class="n" id="balPatrimonio">0.00</div><div class="l">Patrimonio</div></div>
+      </div>
+      <p class="nota-informe" id="balNota"></p>
+
+      <div class="hoja-informe">
+        <h2>Balance General</h2>
+        <p class="negocio-nombre">Cárnicos M&C</p>
+        <p class="periodo-txt" id="balFechaTxt">Corte al: —</p>
+        <div class="tabla-scroll">
+          <table class="datos">
+            <thead><tr><th>Concepto</th><th class="der">Importe (CUP)</th></tr></thead>
+            <tbody id="balTbody"><tr><td colspan="2" class="vacio">Pulse "Ver" para cargar el informe.</td></tr></tbody>
+          </table>
+        </div>
+        <p class="pie-impresion">Emitido el <span class="fecha-emision"></span></p>
+      </div>
+    </section>
+
+    <!-- ============ FLUJO DE CAJA ============ -->
+    <section class="panel" id="pFlujo">
+      <div class="filtros">
+        <div><label>Desde</label><input type="date" id="fcDesde"></div>
+        <div><label>Hasta</label><input type="date" id="fcHasta"></div>
+        <button type="button" id="fcVer">Ver</button>
+      </div>
+      <div class="botones-informe">
+        <button type="button" class="b-excel" id="fcExcel">⬇ Excel</button>
+        <button type="button" class="b-csv" id="fcCsv">⬇ CSV</button>
+        <button type="button" class="b-imprimir" id="fcImprimir">🖶 Imprimir / PDF</button>
+      </div>
+      <p class="aviso-error" id="fcAviso"></p>
+
+      <div class="tarjetas">
+        <div class="tarjeta c-azul"><div class="n" id="fcEntradas">0.00</div><div class="l">Entradas de dinero</div></div>
+        <div class="tarjeta c-rojo"><div class="n" id="fcSalidas">0.00</div><div class="l">Salidas de dinero</div></div>
+        <div class="tarjeta c-verde"><div class="n" id="fcNeto">0.00</div><div class="l">Flujo neto</div></div>
+      </div>
+      <p class="nota-informe" id="fcRefTxt"></p>
+
+      <div class="hoja-informe">
+        <h2>Flujo de Caja</h2>
+        <p class="negocio-nombre">Cárnicos M&C</p>
+        <p class="periodo-txt" id="fcPeriodoTxt">Período: —</p>
+        <div class="tabla-scroll">
+          <table class="datos">
+            <thead><tr><th>Concepto</th><th class="der">Importe (CUP)</th></tr></thead>
+            <tbody id="fcTbody"><tr><td colspan="2" class="vacio">Pulse "Ver" para cargar el informe.</td></tr></tbody>
+          </table>
+        </div>
+
+        <h3 class="seccion">Detalle de movimientos</h3>
+        <div class="tabla-scroll">
+          <table class="datos">
+            <thead><tr><th>Fecha</th><th>Origen</th><th>Tipo</th><th>Concepto</th><th class="der">Importe (CUP)</th></tr></thead>
+            <tbody id="fcDetalleTbody"><tr><td colspan="5" class="vacio">Pulse "Ver" para cargar el informe.</td></tr></tbody>
+          </table>
+        </div>
+        <p class="pie-impresion">Emitido el <span class="fecha-emision"></span></p>
+      </div>
+    </section>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/sonidos.js"></script>
+  <script src="js/avisos.js"></script>
+  <script src="js/informes.js"></script>
+</body>
+</html>

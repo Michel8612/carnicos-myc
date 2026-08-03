@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Avisos - Cárnicos M&C</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    body.avi-body { margin:0; font-family:Arial, Helvetica, sans-serif; background:linear-gradient(to bottom,#f5f5f5,#e0f7fa); color:#000; }
+    header { text-align:center; padding:18px 20px 20px; background:#37474f; color:#fff; box-shadow:0 2px 6px rgba(0,0,0,.25); }
+    .logo-empresa { width:76px; height:76px; object-fit:contain; display:block; margin:0 auto 8px; background:#fff; border-radius:50%; padding:6px; box-shadow:0 2px 8px rgba(0,0,0,.3); }
+    header h1 { color:#fff; font-size:22px; letter-spacing:.5px; text-shadow:0 1px 3px rgba(0,0,0,.4); margin:8px 0; }
+
+    .avi-wrap { max-width:760px; margin:0 auto; padding:0 12px 40px; }
+
+    .barra-acciones { display:flex; gap:8px; flex-wrap:wrap; align-items:center; justify-content:space-between;
+      margin:16px 0 12px; }
+    .filtro-estado { display:flex; gap:6px; }
+    .filtro-estado button { padding:8px 14px; border:1px solid #cfd8dc; background:#fff; color:#37474f;
+      border-radius:20px; cursor:pointer; font-size:13px; }
+    .filtro-estado button.activo { background:#1976D2; color:#fff; border-color:#1976D2; font-weight:bold; }
+    #selTipo { padding:8px 10px; border:1px solid #cfd8dc; border-radius:8px; font-size:13px; background:#fff; }
+    .btn-marcar-todas { padding:8px 14px; border:none; border-radius:8px; cursor:pointer; font-size:13px;
+      font-weight:bold; background:#455a64; color:#fff; white-space:nowrap; }
+    .btn-marcar-todas:hover { background:#263238; }
+    .btn-marcar-todas:disabled { opacity:.5; cursor:not-allowed; }
+
+    .lista-avisos { display:flex; flex-direction:column; gap:10px; }
+    .aviso-fila { background:#fff; border-radius:12px; padding:14px 16px; box-shadow:0 3px 10px rgba(0,0,0,.1);
+      border-left:6px solid #90a4ae; }
+    .aviso-fila.no-leido { background:#fffdf3; }
+    .aviso-fila.sev-info { border-left-color:#1976D2; }
+    .aviso-fila.sev-aviso { border-left-color:#f9a825; }
+    .aviso-fila.sev-urgente { border-left-color:#c62828; }
+
+    .aviso-cab { display:flex; justify-content:space-between; gap:10px; align-items:flex-start; flex-wrap:wrap; }
+    .aviso-titulo { font-weight:bold; font-size:15px; color:#263238; }
+    .aviso-fila.sev-urgente .aviso-titulo { color:#c62828; }
+    .marca-nueva { background:#1976D2; color:#fff; font-size:10.5px; font-weight:bold; padding:2px 7px;
+      border-radius:10px; white-space:nowrap; }
+    .aviso-mensaje { font-size:13.5px; color:#455a64; margin:6px 0; }
+    .aviso-meta { display:flex; gap:10px; flex-wrap:wrap; font-size:11.5px; color:#90a4ae; align-items:center; }
+    .etq-tipo { background:#eceff1; color:#546e7a; padding:2px 8px; border-radius:10px; }
+    .aviso-acciones { margin-top:10px; text-align:right; }
+    .btn-leida { padding:6px 12px; border:1px solid #1976D2; background:#fff; color:#1976D2;
+      border-radius:8px; cursor:pointer; font-size:12.5px; }
+    .btn-leida:hover { background:#e3f2fd; }
+    .btn-leida:disabled { opacity:.5; cursor:not-allowed; }
+
+    .vacio { text-align:center; color:#777; padding:30px 20px; background:#fff; border-radius:12px;
+      box-shadow:0 3px 10px rgba(0,0,0,.08); }
+
+    @media (max-width:520px) {
+      .barra-acciones { flex-direction:column; align-items:stretch; }
+      .filtro-estado { justify-content:center; }
+    }
+  </style>
+</head>
+
+<body class="avi-body">
+  <header>
+    <img src="img/logo.png" alt="Cárnicos M&C" class="logo-empresa logo-circulo">
+    <h1>Avisos</h1>
+    <div class="top-nav">
+      <a href="#" id="navPanel">← Panel</a>
+      <a href="#" onclick="logout();return false;">Salir</a>
+    </div>
+  </header>
+
+  <main class="avi-wrap">
+    <div class="barra-acciones">
+      <div class="filtro-estado">
+        <button type="button" id="bTodos" class="activo">Todos</button>
+        <button type="button" id="bSinLeer">Sin leer</button>
+        <select id="selTipo"><option value="">Todos los tipos</option></select>
+      </div>
+      <button type="button" class="btn-marcar-todas" id="bMarcarTodas">Marcar todas como leídas</button>
+    </div>
+
+    <div class="lista-avisos" id="listaAvisos">
+      <p class="vacio">Cargando…</p>
+    </div>
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/sonidos.js"></script>
+  <script src="js/avisos.js"></script>
+  <script src="js/centro-avisos.js"></script>
+</body>
+</html>

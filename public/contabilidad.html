@@ -8,6 +8,11 @@
   <link rel="stylesheet" href="css/contabilidad.css">
   <style>
     .cont-wrap { max-width:1250px; margin:0 auto; padding:0 12px 40px; }
+    .cont-accesos { display:flex; gap:8px; flex-wrap:wrap; margin:14px 0 4px; }
+    .cont-accesos a { background:#fff; border:1px solid #cfd8dc; border-radius:20px; padding:8px 14px;
+      font-size:13.5px; font-weight:bold; color:#37474f; text-decoration:none; box-shadow:0 2px 5px rgba(0,0,0,.08); }
+    .cont-accesos a:hover { background:#eceff1; }
+    @media print { .cont-accesos { display:none; } }
     /* Pestañas */
     .tabs { display:flex; gap:8px; justify-content:center; flex-wrap:wrap; margin:16px 0; }
     .tabs button { background:#fff; border:1px solid #cfd8dc; color:#37474f; padding:10px 16px; border-radius:20px; cursor:pointer; font-size:14px; }
@@ -86,6 +91,17 @@
   </header>
 
   <main class="cont-wrap">
+    <!-- Accesos de la segunda entrega. Van aquí porque quien tiene el rol
+         "contabilidad" no pasa por el panel de administración: si sus
+         pantallas nuevas solo se enlazaran desde allí, no las vería nunca. -->
+    <p class="cont-accesos">
+      <a href="informes.html">📄 Informes</a>
+      <a href="cuentas.html">🧾 Cobros y pagos</a>
+      <a href="presupuestos.html">🎯 Presupuestos</a>
+      <a href="tablero.html">📈 Indicadores</a>
+      <a href="avisos.html">🔔 Avisos</a>
+    </p>
+
     <!-- Resumen general -->
     <div class="tarjetas">
       <div class="tarjeta c-azul"><div class="n" id="kIngreso">0.00</div><div class="l">Ingresos (histórico)</div></div>

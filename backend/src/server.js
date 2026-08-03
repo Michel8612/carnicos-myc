@@ -49,6 +49,11 @@ import legalRoutes from './routes/legal.js';
 import respaldosRoutes from './routes/respaldos.js';
 import notificacionesRoutes from './routes/notificaciones.js';
 import credencialesRoutes from './routes/credenciales.js';
+import informesRoutes from './routes/informes.js';
+import tableroRoutes from './routes/tablero.js';
+import cuentasRoutes from './routes/cuentas.js';
+import presupuestosRoutes from './routes/presupuestos.js';
+import conciliacionesRoutes from './routes/conciliaciones.js';
 import licenciaRoutes, { bloqueoPorLicencia } from './licencia/rutas.js';
 import { inicializarLicencia } from './licencia/licencia.js';
 import { requiereSesion, escrituraSoloRoles } from './middleware/auth.js';
@@ -149,9 +154,21 @@ app.use('/api/legal', legalRoutes);
 app.use('/api/respaldos', requiereSesion, escrituraSoloRoles(), respaldosRoutes);
 // Avisos: lectura para cualquiera con sesión.
 app.use('/api/notificaciones', requiereSesion, notificacionesRoutes);
-// Los informes contables, las cuentas por cobrar/pagar, los presupuestos
-// y la conciliación son la SEGUNDA entrega de la sección 10. Sus tablas ya
-// están creadas en el esquema; las rutas se montarán cuando existan.
+// --- Segunda entrega de la sección 10 ---
+// Informes contables (estado de resultados, balance, flujo de caja) y
+// tablero de indicadores: solo LEEN. No tienen rutas de escritura, así que
+// basta con exigir sesión; el filtro por rol lo hace cada router por dentro
+// (contabilidad y dueño ven las cifras del negocio).
+app.use('/api/informes', requiereSesion, informesRoutes);
+app.use('/api/tablero', requiereSesion, tableroRoutes);
+// Cuentas por cobrar y por pagar: mismas manos que la contabilidad.
+app.use('/api/cuentas', requiereSesion, escrituraSoloRoles('contabilidad'), cuentasRoutes);
+// Presupuestos: los arma el dueño con contabilidad.
+app.use('/api/presupuestos', requiereSesion, escrituraSoloRoles('contabilidad'), presupuestosRoutes);
+// Conciliación de inventario: el conteo físico lo hace quien está en el
+// almacén, no el contador. Cerrar una conciliación ajusta existencias
+// reales, por eso solo entran los roles de almacén (y el dueño).
+app.use('/api/conciliaciones', requiereSesion, escrituraSoloRoles('almacen', 'almacenero', 'almacen_central'), conciliacionesRoutes);
 // Credenciales de servicios externos (elTOQUE, Transfermóvil...). Solo
 // el dueño: aquí se guardan claves de terceros.
 app.use('/api/credenciales', requiereSesion, escrituraSoloRoles(), credencialesRoutes);

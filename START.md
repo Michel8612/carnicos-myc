@@ -5,27 +5,29 @@
 > `MEMORIA-DEL-PROYECTO.md`, pero **ese archivo es del 29 de julio y no incluye las dos
 > últimas entregas**. Si los dos se contradicen, manda este.
 >
-> Última actualización: **2 de agosto de 2026**
+> Última actualización: **2 de agosto de 2026 (noche)** — sección 10 terminada,
+> pendiente de desplegar.
 
 ---
 
-## 0. Estado al parar (2 de agosto de 2026)
+## 0. Estado al parar (2 de agosto de 2026, noche)
 
-**Todo lo de abajo está desplegado y probado contra producción.** El árbol de git
-está limpio y subido (`ab7fa76`). No hay nada a medias.
+**La sección 10 está TERMINADA.** Los once puntos que faltaban están escritos y
+probados en local: **10 baterías, 0 fallas**, incluida la regresión completa de
+todo lo anterior.
 
-Lo último que se hizo: tributo por banco, historial de tributación, selector de
-área en contabilidad, alta de producto con cantidad, «Cierre diario», avisos al
-almacenero, credenciales desde el panel y copias de seguridad.
+**Lo que falta para entregar es desplegar** (punto 6) y las gestiones que dependen
+del cliente (punto 4). No hay nada a medias en el código.
 
-**Al retomar, empezar por el punto 3: la segunda entrega.** Las tablas de esos
-once puntos YA existen; falta la ruta y la pantalla de cada uno.
+> ⚠️ **Este trabajo NO está desplegado todavía.** Producción sigue con la entrega
+> del 2 de agosto por la mañana. Nada de esto está subido a git ni a Netlify.
 
-Aviso de entorno: la base de pruebas usa el **puerto 5433**. El proyecto TREBOL
-(`D:\TREBOL`) usaba ese mismo puerto y se movió al **5434** el 2 de agosto, así
-que ya no chocan y las dos pueden estar levantadas a la vez. El contenedor de
-pruebas se llama `gestion-db-test` (se recreó ese día porque el anterior tenía el
-mapeo de puerto corrupto y no llegaba a arrancar).
+Aviso de entorno: la base de pruebas pasó del **5433** al **5544**. Windows metió
+el rango 5433-5532 en sus puertos reservados y el contenedor dejó de arrancar
+(`bind: Intento de acceso a un socket no permitido`). El contenedor de pruebas
+sigue llamándose `gestion-db-test`, ahora mapeado a 5544 y **reutilizando el mismo
+volumen de datos**; el anterior quedó renombrado como `gestion-db-test-old5433`
+por si hiciera falta. TREBOL (`D:\TREBOL`) está en el 5434, así que no chocan.
 
 ---
 
@@ -45,7 +47,9 @@ mapeo de puerto corrupto y no llegaba a arrancar).
 
 ## 2. Qué está hecho y funcionando
 
-Todo lo de abajo está **desplegado y probado contra producción** (45/45).
+Las entregas del 29 y 30 de julio y la del 2 de agosto por la mañana están
+**desplegadas y probadas contra producción** (45/45). La última, la del 2 de agosto
+por la noche, está probada **solo en local**: ver el aviso del punto 0.
 
 **Entrega del 29 de julio**
 - Carrito dentro del catálogo, con botón flotante.
@@ -89,27 +93,65 @@ Todo lo de abajo está **desplegado y probado contra producción** (45/45).
 
 ---
 
-## 3. Qué falta — Sección 10 del documento
+**Entrega del 2 de agosto (noche) — segunda entrega de la sección 10, SIN DESPLEGAR**
 
-De los doce puntos que quedaban, **copias de seguridad ya está hecho** (era el único cuyo
-fallo no tenía arreglo). Quedan **once**, agrupados en una segunda entrega:
+Con esto la sección 10 queda cerrada. Once puntos, cinco áreas nuevas:
 
-1. **Reportes exportables (PDF y Excel)** ← *empezar por aquí*
-   Sin esto no se puede presentar nada a la ONAT ni al banco.
-   Ya está escrita la librería `backend/src/servicios/exportar.js` (CSV y Excel reales con
-   exceljs); el PDF se resuelve con vista de impresión, no con un motor en el servidor.
-2. **Estado de resultados · Balance general · Flujo de caja**
-3. **Cuentas por cobrar · Cuentas por pagar**
-4. **Presupuestos · Conciliación de inventario**
-5. **Dashboard de indicadores · Centro de notificaciones**
-   El centro de avisos ya tiene backend (`routes/notificaciones.js`) y campanita; falta la
-   pantalla completa.
+- **Informes contables** (`informes.html`) — Estado de resultados, Balance general y
+  Flujo de caja, con filtro de fechas. Los tres se **descargan en Excel y CSV de verdad**
+  y se imprimen (Ctrl+P → Guardar como PDF) con una vista limpia. Esto es lo que se le
+  presenta a la ONAT y al banco.
+  - El **balance** valora el inventario al costo, suma bancos, caja y lo que deben, resta
+    lo que se debe, y el patrimonio sale **por diferencia** (se avisa en la propia pantalla).
+  - El **flujo de caja** solo cuenta dinero real (banco + caja). Los cobros y pagos de
+    documentos van aparte, marcados como referencia: si ese cobro ya entró al banco,
+    sumarlo lo contaría dos veces.
+- **Cobros y pagos** (`cuentas.html`) — cuentas por cobrar y por pagar con vencimientos,
+  pagos parciales, estado automático (pendiente → parcial → pagada) y **antigüedad de
+  saldos** por tramos (0-30 / 31-60 / 61-90 / +90). Un documento nunca se borra: se anula
+  con motivo. No se puede cambiar el importe de algo que ya tiene pagos.
+- **Presupuestos** (`presupuestos.html`) — lo previsto contra lo real, con semáforo
+  (en gastos pasarse es rojo; en ingresos es al revés). El "real" de un gasto sale de la
+  tabla de gastos por categoría; el de un ingreso, del libro por tipo o por área.
+- **Conteo físico** (`conciliacion.html`) — se abre un conteo por almacén, que **congela la
+  existencia de ese instante**, se cuenta a mano desde el teléfono (guarda por fila, sin
+  botón de "guardar todo") y al cerrar se ajustan las existencias dejando su movimiento de
+  tipo `ajuste` en el historial. **Un conteo cerrado no se reabre ni se edita**: es el acta.
+  También se puede cerrar sin ajustar, solo como constancia.
+- **Indicadores** (`tablero.html`) — cómo va el negocio en una pantalla: ventas, ganancia,
+  gastos, resultado, inventario, bancos, caja, por cobrar/por pagar, alertas de stock bajo
+  y un gráfico de 30 días. El gráfico es **SVG dibujado a mano, sin librerías ni CDN**.
+- **Centro de avisos** (`avisos.html`) — la pantalla completa que le faltaba a la campanita,
+  con filtros y "marcar todas como leídas".
 
-**Las tablas de los once puntos YA ESTÁN CREADAS** en `schema.sql` (`cuentas_terceros`,
-`cuentas_pagos`, `presupuestos`, `presupuesto_lineas`, `conciliaciones`,
-`conciliacion_lineas`, `notificaciones`). Falta el código de las rutas y las pantallas.
-Sus montajes en `server.js` están comentados en el bloque «Sección 10 del ERP»:
-al crear cada archivo de ruta, se descomenta el suyo.
+Además se arregló un fallo real de lo ya entregado: **la campanita nunca marcaba nada**
+porque leía `total` y el servidor devuelve `sin_leer`.
+
+---
+
+## 3. Qué falta para entregar
+
+El código está terminado. Lo que queda no es programar:
+
+1. **Desplegar** (punto 6). Es el único paso que separa esto de estar en manos del cliente.
+   Nada de la segunda entrega está en producción todavía.
+2. **Probar contra la nube** después de desplegar:
+   `BASE=https://carnicos-myc-gestion.netlify.app/api node pruebas/test-fase1.mjs`
+   Ya pasó una vez que una venta fallara solo en producción.
+3. **Las gestiones del punto 4**, que dependen del cliente y no se pueden adelantar aquí.
+
+Y conviene saber, antes de prometerle nada al cliente sobre "funcionar para siempre":
+
+- **La base de datos (Neon) y el hosting (Netlify) son gratuitos.** Funcionan, pero el plan
+  gratis de Neon **suspende la base por inactividad** y puede archivarla si pasa mucho
+  tiempo sin uso; la primera petición del día tarda más por eso. Si el negocio va a
+  depender de esto a diario, hay que decidir con el cliente si se pasa a un plan de pago.
+- **No hay copia de seguridad automática.** La pantalla de respaldos existe, pero alguien
+  tiene que entrar y pulsar. Merece la pena acordar con el cliente cada cuánto lo hará.
+- **Sobre "compilarlo"**: esto es una aplicación web, no se compila. Se abre desde el
+  navegador con su dirección. Si lo que se quiere es un icono en el teléfono, ya está el
+  `capacitor.config.json` para empaquetarla como APK de Android — eso sí sería trabajo
+  aparte y todavía no está hecho ni probado.
 
 ## 4. Gestiones que dependen del cliente (aquí no se puede avanzar solo)
 
@@ -128,7 +170,7 @@ Las baterías están en `pruebas/` — **dentro del repositorio**, para que no s
 ocurrió con las anteriores.
 
 ```bash
-# 1) Postgres de prueba
+# 1) Postgres de prueba  (OJO: ahora en el 5544, no en el 5433)
 docker start gestion-db-test
 
 # 2) Base LIMPIA (imprescindible: los tests no son idempotentes)
@@ -136,7 +178,7 @@ docker exec -e PGPASSWORD=gestion123 gestion-db-test psql -U gestion -d gestion 
 
 # 3) Servidor (recrea el esquema y el usuario admin)
 cd "D:\prueba no borrar\carnicos-myc"
-$env:DATABASE_URL="postgres://gestion:gestion123@localhost:5433/gestion"; $env:PGSSL="off"; $env:JWT_SECRETO="local"; $env:PUERTO="3012"; node backend/src/server.js
+$env:DATABASE_URL="postgres://gestion:gestion123@localhost:5544/gestion"; $env:PGSSL="off"; $env:JWT_SECRETO="local"; $env:PUERTO="3012"; node backend/src/server.js
 
 # 4) Sembrar el escenario (usuarios alm1=2, alm2=3, central=4, coci=5, vend=6, clave prueba123)
 node pruebas/sembrar.mjs
@@ -144,7 +186,7 @@ node pruebas/sembrar.mjs
 # 5) Batería principal (45 comprobaciones de todo el contrato + regresión)
 node pruebas/test-fase1.mjs
 
-# 6) Baterías por área
+# 6) Baterías por área, EN ESTE ORDEN y cada una UNA sola vez
 node pruebas/test_transferencias.mjs
 node pruebas/test_transferencias2.mjs
 node pruebas/test_extra_cancelar_vendedor.mjs
@@ -153,7 +195,14 @@ node pruebas/test_carrito.mjs
 node pruebas/test_regresion.mjs
 node pruebas/test-compras.mjs
 node pruebas/test_tasas.mjs
+
+# 7) Segunda entrega de la sección 10 — va la ÚLTIMA (crea documentos y conteos)
+node pruebas/test_seccion10b.mjs
 ```
+
+Última ejecución completa (2 de agosto, noche): **10 baterías, 0 fallas**.
+`test-fase1` dice «45 pasan, 0 fallan» y `test-compras` «6 pasan, 0 fallan»: cada
+batería imprime su resultado con un formato distinto, no todas dicen «TOTAL FALLAS».
 
 **Contra producción:** `BASE=https://carnicos-myc-gestion.netlify.app/api node pruebas/test-fase1.mjs`
 
@@ -186,6 +235,15 @@ La conexión falla a menudo (Cuba): **reintentar varias veces**, no es error del
   no tiene columna `id` (por ejemplo `parametros`), hay que poner un `RETURNING` explícito.
 - **`js/sonidos.js` pone un botón flotante abajo a la derecha.** Cualquier otro botón flotante
   tiene que esquivarlo (el del carrito va a `bottom:70px`).
+- **Nada de `return` en el nivel superior de los `.js` de `public/`.** Son scripts clásicos,
+  no módulos: un `return` suelto arriba es un error de sintaxis y tumba el archivo entero.
+  El patrón de la casa para las guardas de rol es `throw new Error('sin acceso')`.
+- **Los puertos que hoy funcionan mañana pueden estar reservados por Windows.** Ya pasó con
+  el 5433. Si un contenedor deja de arrancar con «bind: Intento de acceso a un socket no
+  permitido», mirar `netsh interface ipv4 show excludedportrange protocol=tcp` y mover el
+  puerto fuera de esos rangos, en vez de perder la tarde buscando el fallo en el código.
+- **`/api/inventario/existencias` devuelve la existencia SUMADA de todos los almacenes.**
+  Para comprobar un almacén concreto hay que ir a la tabla `existencias`.
 
 ---
 
@@ -199,6 +257,16 @@ La conexión falla a menudo (Cuba): **reintentar varias veces**, no es error del
 - **Las compras solo se registran desde la entrada de almacén** indicando proveedor. No hay
   pantalla de compras aparte, a propósito (sería duplicar la entrada de almacén).
 - **Sin probar: concurrencia.** Dos vendedores tocando el mismo producto a la vez.
+- **El balance valora el inventario de HOY, no el de la fecha de corte.** La tabla
+  `existencias` guarda el saldo actual, no su historial: no hay forma de reconstruir cuánto
+  había un martes de marzo. Para cortes antiguos, la cifra de inventario es la de hoy.
+- **El "real" de una línea de ingreso del presupuesto** se busca por tipo del libro
+  (venta/almacen/produccion) o por área (ventas/almacen/cocina). Si la categoría no coincide
+  con ninguno, sale en cero y la línea se marca; no es un fallo, es que no hay a qué atarla.
+- **El flujo de caja no cuadra solo con la contabilidad.** Cuenta dinero movido, no derechos
+  de cobro. Los cobros de documentos van aparte a propósito (ver punto 2).
+- **Sin empaquetar como aplicación de teléfono.** El `capacitor.config.json` está, pero no se
+  ha generado ni probado ningún APK.
 - **Sin probar: EnZona real.** El mapeo de su respuesta está aislado en una sola función
   marcada como no verificada, para corregirlo en un único sitio cuando lleguen credenciales.
 

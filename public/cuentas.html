@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cuentas por cobrar y por pagar - Cárnicos M&C</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    header { text-align:center; padding:18px 20px 20px; background:#37474f; color:#fff; box-shadow:0 2px 6px rgba(0,0,0,.25); }
+    .logo-cuentas { width:74px; height:74px; object-fit:contain; display:block; margin:0 auto 8px; background:#fff; border-radius:50%; padding:6px; box-shadow:0 2px 8px rgba(0,0,0,.3); }
+    header h1 { color:#fff; font-size:22px; letter-spacing:.5px; text-shadow:0 1px 3px rgba(0,0,0,.4); margin:6px 0; }
+
+    .cu-wrap { max-width:1250px; margin:0 auto; padding:0 12px 40px; }
+    p.sub { margin:0 0 10px; font-size:12.5px; color:#777; }
+    h3.seccion { margin:22px 0 4px; color:#283593; font-size:17px; }
+
+    /* Pestañas cobrar/pagar */
+    .tabs { display:flex; gap:8px; justify-content:center; flex-wrap:wrap; margin:16px 0; }
+    .tabs button { background:#fff; border:1px solid #cfd8dc; color:#37474f; padding:10px 18px; border-radius:20px; cursor:pointer; font-size:14px; }
+    .tabs button.activo { background:#1976D2; color:#fff; border-color:#1976D2; font-weight:bold; }
+
+    /* Cifras grandes */
+    .tarjetas { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin:14px 0; }
+    .tarjeta { background:#fff; border-radius:12px; padding:14px; text-align:center; box-shadow:0 3px 10px rgba(0,0,0,.1); }
+    .tarjeta .n { font-size:24px; font-weight:bold; }
+    .tarjeta .l { font-size:12px; color:#666; margin-top:3px; }
+    .c-azul .n{color:#1565C0} .c-rojo .n{color:#c62828} .c-gris .n{color:#455a64}
+
+    /* Filtros y botones de acción */
+    .filtros { display:flex; gap:10px; flex-wrap:wrap; align-items:end; background:#fff; padding:12px; border-radius:10px; box-shadow:0 3px 10px rgba(0,0,0,.08); margin-bottom:12px; }
+    .filtros label { display:block; font-size:12px; color:#555; margin-bottom:3px; }
+    .filtros select, .filtros input[type="text"] { padding:8px; border:1px solid #cfd8dc; border-radius:8px; font-size:14px; }
+    .filtros .chk { display:flex; align-items:center; gap:6px; padding-bottom:8px; }
+    .filtros .chk label { margin:0; font-size:13px; color:#333; }
+    .filtros button { padding:9px 14px; border:none; border-radius:8px; cursor:pointer; font-size:13.5px; font-weight:bold; }
+    .b-filtrar { background:#1976D2; color:#fff; }
+    .b-gris { background:#607d8b; color:#fff; }
+
+    .acciones-informe { display:flex; gap:8px; flex-wrap:wrap; margin:0 0 14px; }
+    .acciones-informe button { padding:8px 14px; border:none; border-radius:8px; cursor:pointer; font-size:13px; background:#00897b; color:#fff; }
+    .acciones-informe button:hover { background:#00695c; }
+
+    /* Panel plegable de alta */
+    .btn-nuevo { display:block; width:100%; text-align:left; background:#e8eaf6; color:#283593; border:1px dashed #9fa8da; border-radius:10px; padding:12px 16px; font-size:14.5px; font-weight:bold; cursor:pointer; margin-bottom:10px; }
+    .panel-nuevo { background:#fff; border-radius:10px; padding:14px; box-shadow:0 3px 10px rgba(0,0,0,.08); margin-bottom:16px; }
+    .panel-nuevo .campos { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px; }
+    .panel-nuevo label { display:block; font-size:12px; color:#555; margin-bottom:3px; }
+    .panel-nuevo input, .panel-nuevo select { width:100%; box-sizing:border-box; padding:8px; border:1px solid #cfd8dc; border-radius:8px; font-size:14px; }
+    .panel-nuevo .acc { margin-top:12px; display:flex; gap:10px; align-items:center; }
+    .panel-nuevo .acc button { padding:9px 16px; border:none; border-radius:8px; cursor:pointer; font-size:14px; background:#2e7d32; color:#fff; font-weight:bold; }
+    .panel-error { color:#c62828; font-size:13px; margin-top:8px; }
+
+    /* Tabla */
+    .tabla-scroll { overflow-x:auto; margin-top:6px; }
+    table.datos { width:100%; border-collapse:collapse; background:#fff; border-radius:10px; overflow:hidden; box-shadow:0 3px 10px rgba(0,0,0,.1); min-width:820px; }
+    table.datos th { background:#c5cae9; padding:10px 8px; font-size:12.5px; text-align:center; }
+    table.datos td { border-top:1px solid #eceff1; padding:8px; font-size:13.5px; text-align:center; }
+    table.datos td.izq, table.datos th.izq { text-align:left; }
+    .vacio { text-align:center; color:#777; padding:24px; }
+
+    .etq-estado { display:inline-block; padding:3px 10px; border-radius:10px; font-size:11.5px; font-weight:bold; white-space:nowrap; }
+    .e-aldia { background:#e8f5e9; color:#2e7d32; }
+    .e-pronto { background:#fff8e1; color:#8a6d00; }
+    .e-vencida { background:#ffebee; color:#c62828; }
+    .e-pagada { background:#eceff1; color:#607d8b; }
+    .e-anulada { background:#eceff1; color:#90a4ae; text-decoration:line-through; }
+
+    .fila-anulada td { color:#b0bec5; text-decoration:line-through; }
+
+    .acciones-fila { display:flex; gap:5px; flex-wrap:wrap; justify-content:center; }
+    .acciones-fila button { border:none; border-radius:6px; padding:5px 8px; font-size:11.5px; cursor:pointer; color:#fff; white-space:nowrap; }
+    .b-pagar { background:#2e7d32; } .b-ver { background:#1976D2; } .b-editar { background:#ef6c00; } .b-anular { background:#c62828; }
+    .acciones-fila button:disabled { opacity:.4; cursor:not-allowed; }
+
+    /* Antigüedad de saldos */
+    #panelAntiguedad { background:#fff; border-radius:10px; padding:14px; box-shadow:0 3px 10px rgba(0,0,0,.08); margin:16px 0; }
+
+    /* Modales (mismo patrón que ventas.html) */
+    .modal-fondo { position:fixed; inset:0; background:rgba(0,0,0,.45); display:none; align-items:center; justify-content:center; padding:16px; z-index:200; }
+    .modal-fondo.abierto { display:flex; }
+    .modal-caja { background:#fff; border-radius:14px; padding:22px; width:100%; max-width:460px; box-shadow:0 10px 30px rgba(0,0,0,.3); text-align:left; max-height:92vh; overflow:auto; }
+    .modal-caja h2 { color:#1976D2; margin:0 0 14px; font-size:19px; }
+    .modal-caja label { display:block; font-size:13px; font-weight:bold; color:#333; margin:8px 0 4px; }
+    .modal-caja input, .modal-caja select { width:100%; box-sizing:border-box; padding:10px; border:1px solid #ccc; border-radius:8px; font-size:14px; }
+    .modal-acc { display:flex; gap:10px; margin-top:16px; }
+    .modal-acc button { flex:1; padding:11px; border:none; border-radius:8px; cursor:pointer; font-size:14.5px; font-weight:bold; }
+    .modal-acc .b-ok { background:#1976D2; color:#fff; }
+    .modal-acc .b-cancelar { background:#eceff1; color:#455a64; }
+    .modal-err { color:#c62828; background:#ffebee; border:1px solid #ffcdd2; border-radius:6px; padding:8px; margin-top:10px; font-size:13.5px; display:none; }
+    #tbPagosModal td { padding:6px 4px; font-size:12.5px; border-top:1px solid #eceff1; }
+    .btn-borrar-pago { background:#ef5350; color:#fff; border:none; border-radius:6px; padding:3px 8px; font-size:11px; cursor:pointer; }
+
+    /* Vista de impresión: solo título, período y la tabla que esté a la vista */
+    .print-solo { display:none; }
+    @media print {
+      header, .top-nav, .tabs, .filtros, .acciones-informe, .btn-nuevo, .panel-nuevo,
+      .acciones-fila, .avisos-caja, .sonidos-boton, .modal-fondo, .tarjetas, p.sub,
+      h3.seccion { display:none !important; }
+      .print-solo { display:block; text-align:center; margin-bottom:14px; }
+      .print-solo h2 { margin:0; color:#000; }
+      .print-solo p { margin:4px 0 0; font-size:12.5px; color:#333; }
+      .print-pie { display:block !important; text-align:center; font-size:11.5px; color:#555; margin-top:16px; }
+      table.datos { box-shadow:none; }
+      /* Solo se imprime UNA tabla: la que el botón de Imprimir haya
+         marcado (ver prepararImpresion() en cuentas.js). Sin esto, si
+         el panel de antigüedad estaba abierto, saldrían las dos. */
+      body.imprimir-antiguedad #bloqueListado { display:none !important; }
+      body:not(.imprimir-antiguedad) #panelAntiguedad { display:none !important; }
+    }
+    .print-pie { display:none; }
+
+    @media (max-width:600px) {
+      .filtros { flex-direction:column; align-items:stretch; }
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <img src="img/logo.png" alt="Cárnicos M&C" class="logo-cuentas logo-circulo">
+    <h1>Cuentas por cobrar y por pagar</h1>
+    <div class="top-nav">
+      <a href="#" id="navPanel" style="display:none;">← Panel</a>
+      <a href="#" onclick="logout();return false;">Salir</a>
+    </div>
+  </header>
+
+  <main class="cu-wrap">
+    <div class="print-solo" id="printSolo">
+      <h2 id="printTitulo">Cuentas por cobrar</h2>
+      <p id="printPeriodo"></p>
+    </div>
+
+    <p class="sub" style="text-align:center;margin-top:14px;">
+      Lo que los clientes le deben a Cárnicos M&C y lo que Cárnicos M&C le debe a sus proveedores,
+      con sus pagos y su antigüedad.
+    </p>
+
+    <div class="tabs" id="tabsTipo">
+      <button class="activo" data-tipo="cobrar">Por cobrar (clientes)</button>
+      <button data-tipo="pagar">Por pagar (proveedores)</button>
+    </div>
+
+    <div class="tarjetas">
+      <div class="tarjeta c-azul"><div class="n" id="kPendiente">0.00</div><div class="l">Pendiente total</div></div>
+      <div class="tarjeta c-rojo"><div class="n" id="kVencido">0.00</div><div class="l">Vencido</div></div>
+      <div class="tarjeta c-gris"><div class="n" id="kDocs">0</div><div class="l">Documentos</div></div>
+    </div>
+
+    <div class="filtros">
+      <div>
+        <label>Buscar cliente/proveedor</label>
+        <input type="text" id="fTercero" placeholder="Nombre...">
+      </div>
+      <div>
+        <label>Estado</label>
+        <select id="fEstado">
+          <option value="">Todos</option>
+          <option value="pendiente">Pendiente</option>
+          <option value="parcial">Parcial</option>
+          <option value="pagada">Pagada</option>
+          <option value="anulada">Anulada</option>
+        </select>
+      </div>
+      <div class="chk">
+        <label><input type="checkbox" id="fVencidas"> Solo vencidas</label>
+      </div>
+      <button class="b-filtrar" id="btnBuscar" type="button">Buscar</button>
+      <button class="b-gris" id="btnAntiguedad" type="button">Antigüedad de saldos</button>
+    </div>
+
+    <div class="acciones-informe">
+      <button id="btnExcelLista" type="button">⬇ Excel</button>
+      <button id="btnCsvLista" type="button">⬇ CSV</button>
+      <button id="btnImprimirLista" type="button">🖶 Imprimir / PDF</button>
+    </div>
+
+    <button class="btn-nuevo" id="btnNuevo" type="button">+ Nuevo documento</button>
+    <div class="panel-nuevo oculto" id="panelNuevo">
+      <div class="campos">
+        <div>
+          <label>Cliente / Proveedor</label>
+          <input type="text" id="nTercero" placeholder="Nombre">
+        </div>
+        <div>
+          <label>Documento (factura, vale...)</label>
+          <input type="text" id="nDocumento" placeholder="Opcional">
+        </div>
+        <div>
+          <label>Concepto</label>
+          <input type="text" id="nConcepto" placeholder="Opcional">
+        </div>
+        <div>
+          <label>Monto</label>
+          <input type="number" id="nMonto" min="0" step="0.01" placeholder="0.00">
+        </div>
+        <div>
+          <label>Moneda</label>
+          <select id="nMoneda">
+            <option value="CUP">CUP</option>
+            <option value="USD">USD</option>
+            <option value="MLC">MLC</option>
+          </select>
+        </div>
+        <div>
+          <label>Fecha de emisión</label>
+          <input type="date" id="nFechaEmision">
+        </div>
+        <div>
+          <label>Fecha de vencimiento</label>
+          <input type="date" id="nFechaVencimiento">
+        </div>
+        <div>
+          <label>Nota (opcional)</label>
+          <input type="text" id="nNota">
+        </div>
+      </div>
+      <div class="acc">
+        <button id="btnGuardarNuevo" type="button">Guardar documento</button>
+      </div>
+      <p class="panel-error" id="nuevoError"></p>
+    </div>
+
+    <div class="tabla-scroll" id="bloqueListado">
+      <table class="datos" id="tablaCuentas">
+        <thead>
+          <tr>
+            <th class="izq">Cliente / Proveedor</th><th class="izq">Documento</th><th class="izq">Concepto</th>
+            <th>Monto</th><th>Pagado</th><th>Saldo</th><th>Vencimiento</th><th>Estado</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="tbCuentas"><tr><td colspan="9" class="vacio">Cargando…</td></tr></tbody>
+      </table>
+    </div>
+
+    <!-- Antigüedad de saldos -->
+    <section id="panelAntiguedad" class="oculto">
+      <h3 class="seccion" style="margin-top:0;">Antigüedad de saldos</h3>
+      <p class="sub">Cuánto se debe según hace cuánto venció (o se emitió, si no tiene vencimiento). Es el informe que se lleva al banco.</p>
+      <div class="acciones-informe">
+        <button id="btnExcelAntig" type="button">⬇ Excel</button>
+        <button id="btnCsvAntig" type="button">⬇ CSV</button>
+        <button id="btnImprimirAntig" type="button">🖶 Imprimir / PDF</button>
+      </div>
+      <div class="tarjetas" id="tarjetasAntig"></div>
+      <div class="tabla-scroll">
+        <table class="datos" id="tablaAntig">
+          <thead>
+            <tr>
+              <th class="izq">Cliente / Proveedor</th><th>0 a 30 días</th><th>31 a 60 días</th>
+              <th>61 a 90 días</th><th>Más de 90 días</th><th>Total</th>
+            </tr>
+          </thead>
+          <tbody id="tbAntig"><tr><td colspan="6" class="vacio">Sin datos todavía.</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <p class="print-pie" id="printPie"></p>
+  </main>
+
+  <!-- Modal: registrar pago -->
+  <div class="modal-fondo" id="modalPago">
+    <div class="modal-caja">
+      <h2>Registrar pago</h2>
+      <p class="sub" id="pgResumen"></p>
+      <label>Monto</label>
+      <input type="number" id="pgMonto" min="0" step="0.01" placeholder="0.00">
+      <label>Fecha</label>
+      <input type="date" id="pgFecha">
+      <label>Método</label>
+      <select id="pgMetodo">
+        <option value="efectivo">Efectivo</option>
+        <option value="transferencia">Transferencia</option>
+        <option value="enzona">EnZona</option>
+        <option value="transfermovil">Transfermóvil</option>
+        <option value="otro">Otro</option>
+      </select>
+      <label>Referencia (opcional)</label>
+      <input type="text" id="pgReferencia">
+      <label>Nota (opcional)</label>
+      <input type="text" id="pgNota">
+      <p class="modal-err" id="pgError"></p>
+      <div class="modal-acc">
+        <button class="b-cancelar" id="pgCancelar" type="button">Cancelar</button>
+        <button class="b-ok" id="pgGuardar" type="button">Registrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: ver pagos -->
+  <div class="modal-fondo" id="modalVerPagos">
+    <div class="modal-caja">
+      <h2>Pagos registrados</h2>
+      <p class="sub" id="vpResumen"></p>
+      <table style="width:100%;border-collapse:collapse;">
+        <thead>
+          <tr>
+            <th style="text-align:left;font-size:12px;">Fecha</th><th style="font-size:12px;">Monto</th>
+            <th style="font-size:12px;">Método</th><th style="font-size:12px;">Quién</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="tbPagosModal"></tbody>
+      </table>
+      <p class="modal-err" id="vpError"></p>
+      <div class="modal-acc">
+        <button class="b-cancelar" id="vpCerrar" type="button">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: editar documento -->
+  <div class="modal-fondo" id="modalEditar">
+    <div class="modal-caja">
+      <h2>Editar documento</h2>
+      <label>Cliente / Proveedor</label>
+      <input type="text" id="edTercero">
+      <label>Documento</label>
+      <input type="text" id="edDocumento">
+      <label>Concepto</label>
+      <input type="text" id="edConcepto">
+      <label id="edMontoLabel">Monto</label>
+      <input type="number" id="edMonto" min="0" step="0.01">
+      <p class="sub" id="edMontoAviso" style="display:none;">Este documento ya tiene pagos: el importe no se puede cambiar.</p>
+      <label>Fecha de vencimiento</label>
+      <input type="date" id="edFechaVencimiento">
+      <label>Nota</label>
+      <input type="text" id="edNota">
+      <p class="modal-err" id="edError"></p>
+      <div class="modal-acc">
+        <button class="b-cancelar" id="edCancelar" type="button">Cancelar</button>
+        <button class="b-ok" id="edGuardar" type="button">Guardar cambios</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script src="js/sonidos.js"></script>
+  <script src="js/avisos.js"></script>
+  <script src="js/cuentas.js"></script>
+</body>
+</html>

@@ -125,6 +125,24 @@ router.post('/:id/leida', async (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------- POST /leer-todas : vaciar la campanita de un tirón ----------
+// El centro de avisos acumula: quien vuelve de un día libre puede tener
+// veinte sin leer y marcarlas de una en una es absurdo. Igual que arriba,
+// solo se AÑADE el propio id: a los demás destinatarios no se les toca.
+router.post('/leer-todas', async (req, res) => {
+  const filas = await notificacionesPara(req.usuario, 1000);
+  let marcadas = 0;
+  for (const f of filas) {
+    if (yaLeida(f.leida_por, req.usuario.id)) continue;
+    const actuales = (f.leida_por || '').split(',').map((s) => s.trim()).filter(Boolean);
+    actuales.push(String(req.usuario.id));
+    await db.prepare('UPDATE notificaciones SET leida_por = ? WHERE id = ?')
+      .run(actuales.join(','), f.id);
+    marcadas += 1;
+  }
+  res.json({ ok: true, marcadas });
+});
+
 // ============================================================
 //  Para que OTROS módulos avisen sin duplicar SQL
 // ============================================================

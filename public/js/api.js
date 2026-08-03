@@ -299,7 +299,92 @@ const API = {
   avisos: () => apiFetch('/notificaciones'),
   avisosContador: () => apiFetch('/notificaciones/contador'),
   avisoLeido: (id) => apiFetch(`/notificaciones/${id}/leida`, { method: 'POST' }),
+  avisosLeerTodas: () => apiFetch('/notificaciones/leer-todas', { method: 'POST' }),
+
+  // ============================================================
+  //  SEGUNDA ENTREGA DE LA SECCIÓN 10
+  // ============================================================
+
+  // ---- Informes contables (§10.2) ----
+  // Los tres devuelven JSON para pintar en pantalla. Para descargar el
+  // archivo NO se usan estas funciones: se abre `urlDescarga(...)` en una
+  // pestaña, porque un fetch con token no dispara la descarga del navegador.
+  informeEstadoResultados: (p) => apiFetch('/informes/estado-resultados?' + new URLSearchParams(p || {}).toString()),
+  informeBalance: (p) => apiFetch('/informes/balance?' + new URLSearchParams(p || {}).toString()),
+  informeFlujoCaja: (p) => apiFetch('/informes/flujo-caja?' + new URLSearchParams(p || {}).toString()),
+
+  // ---- Tablero de indicadores (§10.5) ----
+  indicadores: (p) => apiFetch('/tablero/indicadores?' + new URLSearchParams(p || {}).toString()),
+
+  // ---- Cuentas por cobrar y por pagar (§10.3) ----
+  cuentasTerceros: (p) => apiFetch('/cuentas?' + new URLSearchParams(p || {}).toString()),
+  cuentaTerceroCrear: (d) => apiFetch('/cuentas', { method: 'POST', body: JSON.stringify(d) }),
+  cuentaTerceroEditar: (id, d) => apiFetch(`/cuentas/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
+  cuentaTerceroAnular: (id, motivo) => apiFetch(`/cuentas/${id}/anular`, { method: 'POST', body: JSON.stringify({ motivo }) }),
+  cuentaTerceroPagos: (id) => apiFetch(`/cuentas/${id}/pagos`),
+  cuentaTerceroPagar: (id, d) => apiFetch(`/cuentas/${id}/pagos`, { method: 'POST', body: JSON.stringify(d) }),
+  cuentaTerceroPagoBorrar: (pagoId, motivo) => apiFetch(`/cuentas/pagos/${pagoId}`, { method: 'DELETE', body: JSON.stringify({ motivo }) }),
+  cuentasAntiguedad: (p) => apiFetch('/cuentas/antiguedad?' + new URLSearchParams(p || {}).toString()),
+
+  // ---- Presupuestos (§10.4) ----
+  presupuestos: () => apiFetch('/presupuestos'),
+  presupuesto: (id) => apiFetch(`/presupuestos/${id}`),
+  presupuestoCrear: (d) => apiFetch('/presupuestos', { method: 'POST', body: JSON.stringify(d) }),
+  presupuestoEditar: (id, d) => apiFetch(`/presupuestos/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
+  presupuestoBorrar: (id) => apiFetch(`/presupuestos/${id}`, { method: 'DELETE' }),
+  presupuestoLineaCrear: (id, d) => apiFetch(`/presupuestos/${id}/lineas`, { method: 'POST', body: JSON.stringify(d) }),
+  presupuestoLineaEditar: (lineaId, d) => apiFetch(`/presupuestos/lineas/${lineaId}`, { method: 'PUT', body: JSON.stringify(d) }),
+  presupuestoLineaBorrar: (lineaId) => apiFetch(`/presupuestos/lineas/${lineaId}`, { method: 'DELETE' }),
+  presupuestoComparativo: (id) => apiFetch(`/presupuestos/${id}/comparativo`),
+
+  // ---- Conciliación de inventario (§10.4) ----
+  conciliaciones: (p) => apiFetch('/conciliaciones?' + new URLSearchParams(p || {}).toString()),
+  conciliacion: (id) => apiFetch(`/conciliaciones/${id}`),
+  conciliacionAbrir: (d) => apiFetch('/conciliaciones', { method: 'POST', body: JSON.stringify(d) }),
+  conciliacionLinea: (lineaId, d) => apiFetch(`/conciliaciones/lineas/${lineaId}`, { method: 'PUT', body: JSON.stringify(d) }),
+  conciliacionCerrar: (id, d) => apiFetch(`/conciliaciones/${id}/cerrar`, { method: 'POST', body: JSON.stringify(d || {}) }),
+  conciliacionAnular: (id, motivo) => apiFetch(`/conciliaciones/${id}/anular`, { method: 'POST', body: JSON.stringify({ motivo }) }),
 };
+
+// ============================================================
+//  Descargas (Excel / CSV)
+//
+//  Un `fetch` con la cabecera Authorization devuelve los bytes, pero no
+//  hace que el navegador guarde el archivo, y aquí no se puede meter el
+//  token en la URL (quedaría en el historial y en los registros del
+//  servidor). Solución: se pide el archivo con fetch, se convierte en un
+//  enlace temporal en memoria (blob) y se "pulsa" solo. El archivo se
+//  guarda con el nombre que manda el servidor.
+// ============================================================
+async function descargarInforme(ruta, parametros, formato) {
+  const q = new URLSearchParams(parametros || {});
+  q.set('formato', formato);
+  const token = getToken();
+  const res = await fetch(`${API_BASE}${ruta}?${q.toString()}`, {
+    headers: token ? { Authorization: 'Bearer ' + token } : {},
+  });
+  if (!res.ok) {
+    const datos = await res.json().catch(() => ({}));
+    throw new Error(datos.error || 'No se pudo generar el archivo.');
+  }
+  // El servidor manda el nombre en Content-Disposition; si por lo que sea
+  // no llega (algún proxy lo quita), se usa uno genérico con la fecha.
+  const cabecera = res.headers.get('Content-Disposition') || '';
+  const coincide = /filename="?([^";]+)"?/i.exec(cabecera);
+  const nombre = coincide ? coincide[1] : `informe-${new Date().toISOString().slice(0, 10)}.${formato === 'xlsx' ? 'xlsx' : 'csv'}`;
+
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = nombre;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Liberar la memoria del blob; sin esto, descargar varios informes
+  // seguidos va dejando copias del archivo retenidas en la pestaña.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 // Exponer en window para las páginas (scripts clásicos).
 window.API = API;
@@ -311,5 +396,6 @@ window.getUsuario = getUsuario;
 window.etiquetaRol = etiquetaRol;
 window.homeDeRol = homeDeRol;
 window.esDueno = esDueno;
+window.descargarInforme = descargarInforme;
 window.soloRoles = soloRoles;
 window.soloDuenoPagina = soloDuenoPagina;

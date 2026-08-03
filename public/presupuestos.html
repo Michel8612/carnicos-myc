@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Presupuestos - Cárnicos M&C</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    body.presupuestos-body { margin:0; font-family:Arial, Helvetica, sans-serif; background:linear-gradient(to bottom,#f5f5f5,#e0f7fa); color:#000; }
+    header { text-align:center; padding:18px 20px 20px; background:#37474f; color:#fff; box-shadow:0 2px 6px rgba(0,0,0,.25); }
+    .logo-empresa { width:76px; height:76px; object-fit:contain; display:block; margin:0 auto 8px; background:#fff; border-radius:50%; padding:6px; box-shadow:0 2px 8px rgba(0,0,0,.3); }
+    header h1 { color:#fff; font-size:24px; letter-spacing:.5px; text-shadow:0 1px 3px rgba(0,0,0,.4); margin:8px 0; }
+
+    .pres-wrap { max-width:1100px; margin:0 auto; padding:0 12px 40px; }
+    p.sub { margin:0 0 10px; font-size:12.5px; color:#777; }
+    h3.seccion { margin:22px 0 8px; color:#283593; font-size:17px; }
+
+    .filtros { display:flex; gap:10px; flex-wrap:wrap; align-items:end; background:#fff; padding:12px; border-radius:10px; box-shadow:0 3px 10px rgba(0,0,0,.08); margin-bottom:10px; }
+    .filtros label { display:block; font-size:12px; color:#555; margin-bottom:3px; }
+    .filtros select, .filtros input { padding:8px; border:1px solid #cfd8dc; border-radius:8px; font-size:14px; box-sizing:border-box; }
+    .filtros button { padding:9px 14px; border:none; border-radius:8px; cursor:pointer; font-size:14px; font-weight:bold; }
+    .b-filtrar { background:#1976D2; color:#fff; }
+    .b-verde { background:#2e7d32; color:#fff; }
+    .b-gris { background:#607d8b; color:#fff; }
+    .b-azul { background:#1976D2; color:#fff; }
+    .btn-x { background:#ef5350; color:#fff; border:none; border-radius:6px; padding:6px 10px; cursor:pointer; font-size:13px; }
+    .btn-x:hover { background:#c62828; }
+
+    .tabla-scroll { overflow-x:auto; margin-top:10px; }
+    table.datos { width:100%; border-collapse:collapse; background:#fff; border-radius:10px; overflow:hidden; box-shadow:0 3px 10px rgba(0,0,0,.1); min-width:640px; }
+    table.datos th { background:#c5cae9; padding:10px 8px; font-size:12.5px; text-align:center; }
+    table.datos td { border-top:1px solid #eceff1; padding:8px; font-size:13.5px; text-align:center; }
+    table.datos td.izq, table.datos th.izq { text-align:left; }
+    table.datos tfoot td { background:#f5f5f5; }
+    table.datos select, table.datos input[type="number"], table.datos input[type="text"] {
+      padding:6px; border:1px solid #cfd8dc; border-radius:6px; font-size:13.5px; box-sizing:border-box; width:100%;
+    }
+
+    .tarjetas { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin:14px 0; }
+    .tarjeta { background:#fff; border-radius:12px; padding:14px; text-align:center; box-shadow:0 3px 10px rgba(0,0,0,.1); }
+    .tarjeta .n { font-size:20px; font-weight:bold; }
+    .tarjeta .l { font-size:12px; color:#666; margin-top:3px; }
+    .c-azul .n{color:#1565C0} .c-rojo .n{color:#c62828} .c-verde .n{color:#2e7d32}
+    .c-morado .n{color:#6a1b9a} .c-naranja .n{color:#e65100} .c-gris .n{color:#455a64}
+
+    .aviso { background:#fff8e1; border:1px solid #ffca28; color:#7a5c00; border-radius:8px; padding:10px 14px; font-size:12.5px; margin:14px 0; }
+    .aviso b { color:#5d4400; }
+    .vacio { text-align:center; color:#777; padding:24px; }
+    .cred-error { color:#c62828; font-size:13px; min-height:16px; }
+
+    .oculto { display:none !important; }
+
+    /* Semáforo del comparativo: en gastos, pasarse es rojo; en
+       ingresos, quedarse corto es rojo. La lógica del color vive en
+       el JS (depende del tipo de línea), aquí solo el estilo. */
+    .sem-bien { color:#2e7d32; font-weight:bold; }
+    .sem-mal { color:#c62828; font-weight:bold; }
+    .sem-neutro { color:#616161; }
+    .sin-datos { font-size:11px; color:#e65100; display:block; margin-top:2px; }
+
+    /* Barra de progreso simple: un div con el ancho como % de avance. */
+    .barra-fondo { background:#eceff1; border-radius:6px; height:10px; width:100%; min-width:80px; overflow:hidden; }
+    .barra-rel { height:100%; border-radius:6px; }
+    .barra-rel.b-verde-i { background:#2e7d32; }
+    .barra-rel.b-roja-i { background:#c62828; }
+
+    @media (max-width:700px) { .filtros { flex-direction:column; align-items:stretch; } }
+
+    /* Vista de impresión del comparativo: solo título, presupuesto,
+       período y la tabla. Cabecera, navegación, filtros y botones
+       fuera (no sirven de nada en papel y solo restan espacio). */
+    .solo-print { display:none; }
+    @media print {
+      header, .top-nav, .no-print, #vistaLista, #vistaDetalle,
+      #btnSonido, .avisos-caja, .aviso { display:none !important; }
+      body { background:#fff; }
+      .pres-wrap { max-width:100%; padding:0; }
+      table.datos { box-shadow:none; }
+      .solo-print { display:block; margin-top:14px; font-size:11px; color:#555; }
+    }
+  </style>
+</head>
+
+<body class="presupuestos-body">
+  <header>
+    <img src="img/logo.png" alt="Cárnicos M&C" class="logo-empresa logo-circulo">
+    <h1>Presupuestos</h1>
+    <div class="top-nav">
+      <a href="#" id="navPanel" style="display:none;">← Panel</a>
+      <a href="#" onclick="logout();return false;">Salir</a>
+    </div>
+  </header>
+
+  <main class="pres-wrap">
+
+    <!-- ===================== VISTA 1: LISTA ===================== -->
+    <section id="vistaLista" class="vista">
+      <p class="sub">
+        Cada presupuesto fija cuánto se espera ingresar y gastar en un período. El
+        <b>comparativo</b> lo cruza después contra lo que de verdad quedó registrado
+        en Gastos y en el libro de contabilidad.
+      </p>
+
+      <h3 class="seccion">Nuevo presupuesto</h3>
+      <div class="filtros">
+        <div><label>Nombre</label><input type="text" id="nNombre" placeholder="Ej. Agosto 2026"></div>
+        <div><label>Desde</label><input type="date" id="nDesde"></div>
+        <div><label>Hasta</label><input type="date" id="nHasta"></div>
+        <div><label>Nota (opcional)</label><input type="text" id="nNota"></div>
+        <button class="b-filtrar" id="btnCrear" type="button">Crear presupuesto</button>
+      </div>
+      <p class="cred-error" id="errLista"></p>
+
+      <h3 class="seccion">Presupuestos existentes</h3>
+      <div class="tabla-scroll">
+        <table class="datos">
+          <thead>
+            <tr>
+              <th class="izq">Nombre</th><th>Período</th><th>Líneas</th>
+              <th>Previsto ingresos</th><th>Previsto gastos</th><th>Resultado previsto</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="tbLista"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ===================== VISTA 2: DETALLE ===================== -->
+    <section id="vistaDetalle" class="vista oculto">
+      <p><button class="b-gris" id="btnVolverLista" type="button">← Volver a la lista</button></p>
+      <h3 class="seccion" id="dTitulo">Presupuesto</h3>
+
+      <div class="filtros">
+        <div><label>Nombre</label><input type="text" id="dNombre"></div>
+        <div><label>Desde</label><input type="date" id="dDesde"></div>
+        <div><label>Hasta</label><input type="date" id="dHasta"></div>
+        <div><label>Nota</label><input type="text" id="dNota"></div>
+        <button class="b-filtrar" id="btnGuardarCabecera" type="button">Guardar cambios</button>
+        <button class="btn-x" id="btnBorrarPresupuesto" type="button">✕ Borrar presupuesto</button>
+      </div>
+      <p class="cred-error" id="errDetalle"></p>
+
+      <h3 class="seccion">Líneas del presupuesto</h3>
+      <p class="sub">
+        En una línea de <b>gasto</b>, la categoría es una de las categorías de gasto ya
+        configuradas en Contabilidad. En una de <b>ingreso</b>, se elige a qué corte del
+        libro corresponde (por tipo de hecho o por área del negocio).
+      </p>
+      <div class="tabla-scroll">
+        <table class="datos">
+          <thead>
+            <tr><th>Tipo</th><th class="izq">Categoría</th><th>Previsto</th><th></th></tr>
+          </thead>
+          <tbody id="tbLineas"></tbody>
+          <tfoot>
+            <tr>
+              <td>
+                <select id="lTipo">
+                  <option value="gasto">Gasto</option>
+                  <option value="ingreso">Ingreso</option>
+                </select>
+              </td>
+              <td><select id="lCategoria" class="izq"></select></td>
+              <td><input type="number" id="lPrevisto" min="0" step="0.01" placeholder="0.00"></td>
+              <td><button class="b-verde" id="btnAnadirLinea" type="button">+ Añadir</button></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <p class="cred-error" id="errLinea"></p>
+
+      <p style="margin:18px 0;">
+        <button class="b-azul" id="btnVerComparativo" type="button">Ver comparativo</button>
+      </p>
+    </section>
+
+    <!-- ===================== VISTA 3: COMPARATIVO ===================== -->
+    <section id="vistaComparativo" class="vista oculto">
+      <p class="no-print"><button class="b-gris" id="btnVolverDetalle" type="button">← Volver al presupuesto</button></p>
+
+      <h2 id="cTitulo" style="color:#283593; margin-bottom:2px;">Comparativo</h2>
+      <p class="sub" id="cPeriodo"></p>
+
+      <p class="aviso">
+        <b>Cómo se calcula el real:</b> en las líneas de <b>gasto</b> se suma lo anotado
+        en Gastos con esa misma categoría, dentro del período. En las de <b>ingreso</b> se
+        suma lo anotado en el libro de contabilidad: por <b>tipo</b> si la categoría es
+        "venta", "almacen" o "produccion", o por <b>área</b> si es "ventas" o "cocina".
+        Una categoría que no coincida con nada de eso sale en <b>0</b> y se marca
+        "sin datos" — no es un error, es que no hay de dónde sacar ese real.
+      </p>
+
+      <div class="filtros no-print">
+        <button class="b-azul" id="btnExcel" type="button">Excel</button>
+        <button class="b-azul" id="btnCsv" type="button">CSV</button>
+        <button class="b-gris" id="btnImprimir" type="button">Imprimir / PDF</button>
+      </div>
+      <p class="cred-error" id="errComparativo"></p>
+
+      <div class="tabla-scroll">
+        <table class="datos">
+          <thead>
+            <tr>
+              <th class="izq">Tipo</th><th class="izq">Categoría</th><th>Previsto</th>
+              <th>Real</th><th>Desviación</th><th>%</th><th>Progreso</th>
+            </tr>
+          </thead>
+          <tbody id="tbComparativo"></tbody>
+        </table>
+      </div>
+
+      <h3 class="seccion">Resultado</h3>
+      <div class="tarjetas">
+        <div class="tarjeta c-azul"><div class="n" id="rPrevistoIngresos">0.00</div><div class="l">Ingresos previstos</div></div>
+        <div class="tarjeta c-verde"><div class="n" id="rRealIngresos">0.00</div><div class="l">Ingresos reales</div></div>
+        <div class="tarjeta c-naranja"><div class="n" id="rPrevistoGastos">0.00</div><div class="l">Gastos previstos</div></div>
+        <div class="tarjeta c-rojo"><div class="n" id="rRealGastos">0.00</div><div class="l">Gastos reales</div></div>
+        <div class="tarjeta c-gris"><div class="n" id="rResultadoPrevisto">0.00</div><div class="l">Resultado previsto</div></div>
+        <div class="tarjeta c-morado"><div class="n" id="rResultadoReal">0.00</div><div class="l">Resultado real</div></div>
+      </div>
+
+      <p class="solo-print" id="piePresupuestoImprimir"></p>
+    </section>
+
+  </main>
+
+  <script src="js/api.js"></script>
+  <script src="js/sonidos.js"></script>
+  <script src="js/avisos.js"></script>
+  <script src="js/presupuestos.js"></script>
+</body>
+</html>
