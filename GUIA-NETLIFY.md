@@ -21,7 +21,8 @@ Estructura del proyecto:
 (`postgresql://...`) y ponla como variable `DATABASE_URL` (Paso 3).
 
 > La app crea las tablas sola la primera vez y crea el usuario inicial
-> **admin / admin123** con datos de ejemplo (almacenes y unidades).
+> el usuario **admin** con datos de ejemplo (almacenes y unidades). La clave inicial
+> se genera en la instalación y **no se publica en este repositorio**.
 
 ---
 
@@ -58,7 +59,8 @@ Luego **Deploy → Trigger deploy**.
 ## Paso 4 — Entrar
 
 1. Abre la URL de Netlify (ej. `https://carnicos-myc.netlify.app`).
-2. Entra con **admin / admin123** (cámbiala desde el panel: “Cambiar Usuario/Contraseña Admin”).
+2. Entra con el usuario **admin** y la clave que se te entregó aparte, y **cámbiala en el acto**
+   desde el panel: “Cambiar Usuario/Contraseña Admin”.
 
 ### Instalar como app en el teléfono/PC
 - **Android (Chrome):** menú ⋮ → *Agregar a pantalla de inicio*.

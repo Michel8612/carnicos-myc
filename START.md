@@ -28,7 +28,7 @@ tenía el libro (era un error de tecleo y deformaba todos los informes).
 
 - Se hizo con el propio botón de restaurar de la aplicación, mandándole un respaldo
   con las tablas de operación vacías. Nada de SQL por fuera.
-- **Sobrevive solo `admin` / `admin123`.** Los usuarios Kevin y lolo se borraron: el
+- **Sobrevive solo el usuario `admin`.** Los usuarios Kevin y lolo se borraron: el
   cliente crea su propio personal. **Lo primero que debe hacer es cambiar esa clave.**
 - Se conservó la configuración de fábrica: 14 categorías de gasto, 10 unidades, el
   «Almacén principal», los parámetros de tributación y los documentos legales. Sin
@@ -57,7 +57,9 @@ por si hiciera falta. TREBOL (`D:\TREBOL`) está en el 5434, así que no chocan.
 | Base de datos | Neon (PostgreSQL), proyecto `withered-sunset-27343021` |
 | Último commit desplegado | `20a2b29` — sección 10 completa (2 ago, noche) |
 
-**Acceso:** `admin` / `admin123`
+**Acceso:** usuario `admin`. **La clave NO se escribe aquí**: este repositorio es
+público y cualquiera podría leerla. Está fuera del repo, en
+`D:\prueba no borrar\_respaldos-datos-cliente\CLAVE-ADMIN.txt`.
 
 ---
 

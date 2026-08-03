@@ -35,7 +35,7 @@ se reutilizó como motor.
 | Base de datos | **Neon** (PostgreSQL), proyecto `withered-sunset-27343021`, base `carnicos-myc` |
 | APK Android | GitHub → Actions → artefacto `carnicos-myc-apk` |
 
-**Acceso inicial:** `admin` / `admin123`
+**Acceso inicial:** usuario `admin`; la clave se entrega aparte, nunca en este repositorio.
 
 > ⚠️ La contraseña de la base **no se escribe aquí** porque este repositorio es público.
 > Está en las variables de entorno de Netlify (`DATABASE_URL`). **Pendiente: rotarla**, porque
@@ -164,7 +164,7 @@ Si `netlify` no se encuentra: `$env:PATH="$env:PATH;$env:APPDATA\npm"`.
 La conexión falla a menudo (Cuba): **reintenta varias veces**, no es un error del código.
 
 **Dejar la base lista para el cliente:** hay un script que borra todos los datos y deja solo
-`admin`/`admin123` con un almacén. Se crea temporalmente en la carpeta del proyecto (para usar
+el usuario `admin` con un almacén. Se crea temporalmente en la carpeta del proyecto (para usar
 sus dependencias `pg` y `bcryptjs`), se ejecuta con `NEON_URL` y **se borra después** — no debe
 quedar en el repositorio.
 
