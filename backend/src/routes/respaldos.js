@@ -235,8 +235,19 @@ router.post('/restaurar', async (req, res) => {
         if (!cols.length) continue;
         const marcadores = cols.map(() => '?').join(', ');
         const nombresCols = cols.map((c) => `"${c}"`).join(', ');
+        // El envoltorio de la base añade "RETURNING id" a todo INSERT que no
+        // traiga ya un RETURNING (emula el lastInsertRowid de SQLite). Cuatro
+        // tablas no tienen columna `id` — parametros, categorias_gasto,
+        // credenciales y autorizaciones_usadas — y ese añadido las hacía
+        // fallar con «column "id" does not exist». Como la restauración va en
+        // una sola transacción, una de esas filas tumbaba la restauración
+        // ENTERA: el botón de restaurar no servía para ningún respaldo real.
+        // Con un RETURNING explícito el envoltorio ya no pone el suyo; aquí no
+        // hace falta el id nuevo, porque las filas se insertan con los valores
+        // que traía el respaldo.
+        const retorno = colsValidas.has('id') ? '' : ' RETURNING 1';
         await db.prepare(`
-          INSERT INTO "${tabla}" (${nombresCols}) VALUES (${marcadores})
+          INSERT INTO "${tabla}" (${nombresCols}) VALUES (${marcadores})${retorno}
         `).run(...cols.map((c) => fila[c]));
         totalFilas += 1;
       }
