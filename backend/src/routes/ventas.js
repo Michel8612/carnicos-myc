@@ -351,6 +351,15 @@ router.delete('/producto/:id', async (req, res) => {
 router.post('/reiniciar', async (req, res) => {
   const usuarioId = duenoDeLaHoja(req, req.body);
 
+  // Con qué se cobró la jornada. Por defecto efectivo en CUP, que es lo
+  // habitual: así el cierre de siempre sigue funcionando igual aunque la
+  // pantalla no mande nada.
+  const FORMAS_PAGO = ['efectivo', 'transferencia'];
+  const formaPago = FORMAS_PAGO.includes(req.body?.forma_pago) ? req.body.forma_pago : 'efectivo';
+  const monedaCobro = /^[A-Z]{2,6}$/.test(String(req.body?.moneda || '').toUpperCase())
+    ? String(req.body.moneda).toUpperCase()
+    : 'CUP';
+
   const filas = await db.prepare(
     'SELECT * FROM venta_inventario WHERE usuario_id = ? AND vendido > 0'
   ).all(usuarioId);
@@ -413,13 +422,78 @@ router.post('/reiniciar', async (req, res) => {
     nota: `Ganancia: ${totalGanancia.toFixed(2)} · Costo: ${totalCosto.toFixed(2)} · ${filas.length} producto(s) con venta.`,
   });
 
+  // El dinero cobrado entra al balance del negocio (Parte 2), en la
+  // moneda y la forma con que se cobró de verdad. Hasta ahora el cierre
+  // dejaba el rastro contable pero el dueño tenía que sumar a mano lo que
+  // le había entrado: eso era justo lo que pedía el cliente.
+  //
+  // Va FUERA de un try/catch que corte: si esto fallara, el cierre ya se
+  // hizo y la mercancía ya se descontó. Se registra el fallo y se sigue,
+  // igual que hace el libro contable.
+  if (totalDinero > 0) {
+    try {
+      const nombreVendedor = (await db.prepare('SELECT nombre FROM usuarios WHERE id = ?').get(usuarioId))?.nombre
+        || req.usuario.usuario;
+      await db.prepare(`
+        INSERT INTO dinero_movimientos (forma, moneda, monto, concepto, origen_tipo, origen_id, usuario_id, nota)
+        VALUES (?, ?, ?, ?, 'venta', ?, ?, ?)
+      `).run(
+        formaPago, monedaCobro, Number(totalDinero.toFixed(2)),
+        `Ventas del día — ${nombreVendedor}`,
+        usuarioId, req.usuario.id,
+        `${filas.length} producto(s). Ganancia: ${totalGanancia.toFixed(2)}.`,
+      );
+    } catch (e) {
+      console.error('No se pudo llevar el cobro al balance de dinero:', e.message);
+    }
+  }
+
   res.json({
     ok: true,
     total_dinero: Number(totalDinero.toFixed(2)),
     total_costo: Number(totalCosto.toFixed(2)),
     total_ganancia: totalGanancia,
     productos: filas.length,
+    forma_pago: formaPago,
+    moneda: monedaCobro,
   });
+});
+
+// ---------- GET /ingresos-por-punto : cuánto entró en cada punto de venta ----------
+// "En el punto de venta XYZ ingresó ___". Se agrupa por el vendedor dueño
+// de la hoja, que ES el punto de venta: por eso un punto nuevo aparece
+// solo, con su nombre, sin tocar código — que es lo que se pidió.
+router.get('/ingresos-por-punto', async (req, res) => {
+  if (!ES_JEFE(req.usuario.rol) && req.usuario.rol !== 'contabilidad') {
+    return res.status(403).json({ error: 'No tiene permiso para ver los ingresos por punto de venta.' });
+  }
+  const { desde, hasta } = req.query;
+  const cond = ["d.origen_tipo = 'venta'"];
+  const params = [];
+  if (desde) { cond.push('d.fecha >= ?'); params.push(desde); }
+  if (hasta) { cond.push('d.fecha <= ?'); params.push(`${hasta} 23:59:59`); }
+
+  const filas = await db.prepare(`
+    SELECT COALESCE(u.nombre, 'Sin asignar') AS punto,
+           d.moneda, d.forma,
+           COALESCE(SUM(d.monto), 0) AS total,
+           COUNT(*) AS cierres,
+           MAX(d.fecha) AS ultimo
+      FROM dinero_movimientos d
+      LEFT JOIN usuarios u ON u.id = d.origen_id
+     WHERE ${cond.join(' AND ')}
+     GROUP BY 1, 2, 3
+     ORDER BY 1, 2
+  `).all(...params);
+
+  res.json(filas.map((f) => ({
+    punto: f.punto,
+    moneda: f.moneda,
+    forma: f.forma,
+    total: Number(Number(f.total).toFixed(2)),
+    cierres: Number(f.cierres),
+    ultimo: f.ultimo,
+  })));
 });
 
 // ---------- Cierres anteriores (historial de "Cierre diario") ----------
@@ -522,6 +596,21 @@ router.post('/carrito', async (req, res) => {
         INSERT INTO caja (tipo, concepto, monto, moneda, origen_tipo, origen_id, usuario_id)
         VALUES ('ingreso', ?, ?, 'CUP', 'venta', ?, ?)
       `).run(`Venta a ${cliente || 'Cliente'}`, total, ventaId, req.usuario.id);
+
+      // 4.b) Y al dinero disponible del negocio, para que el dueño vea el
+      // cobro sin esperar al cierre del día. La venta por carrito se cobra
+      // en el acto: si solo entrara en el cierre, el balance mentiría
+      // durante toda la jornada.
+      const formaCarrito = ['efectivo', 'transferencia'].includes(req.body?.forma_pago)
+        ? req.body.forma_pago
+        : 'efectivo';
+      const monedaCarrito = /^[A-Z]{2,6}$/.test(String(req.body?.moneda || '').toUpperCase())
+        ? String(req.body.moneda).toUpperCase()
+        : 'CUP';
+      await db.prepare(`
+        INSERT INTO dinero_movimientos (forma, moneda, monto, concepto, origen_tipo, origen_id, usuario_id)
+        VALUES (?, ?, ?, ?, 'venta', ?, ?)
+      `).run(formaCarrito, monedaCarrito, total, `Venta a ${cliente || 'Cliente'}`, req.usuario.id, req.usuario.id);
     }
 
     // 5) Apunte en el libro de contabilidad.

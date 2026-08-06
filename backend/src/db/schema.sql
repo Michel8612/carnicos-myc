@@ -84,6 +84,29 @@ CREATE TABLE IF NOT EXISTS movimientos (
   nota        TEXT
 );
 
+-- Costo de cada ENTRADA, en las dos monedas y con la tasa de ese día.
+--
+-- Por qué se guardan los tres datos y no solo uno: la tasa del dólar cambia
+-- a diario. Si se guardara únicamente el importe en USD y se convirtiera al
+-- mostrarlo, el costo de una compra de enero cambiaría cada mañana, y con él
+-- la ganancia y el margen. Lo que se archiva tiene que ser una foto fija del
+-- día de la compra, no un cálculo que se rehace cada vez que alguien mira.
+--
+-- `moneda_origen` dice en cuál de las dos se pagó DE VERDAD; la otra es la
+-- equivalencia. Hace falta para el valor del inventario, que se pide separado
+-- por moneda de adquisición.
+--
+-- Van como ALTER y no dentro del CREATE porque la tabla ya existe en las
+-- instalaciones en marcha, y `CREATE TABLE IF NOT EXISTS` no añade columnas a
+-- una tabla que ya está: no pasaría nada y el campo nunca aparecería.
+ALTER TABLE movimientos ADD COLUMN IF NOT EXISTS costo_unitario_cup DOUBLE PRECISION;
+ALTER TABLE movimientos ADD COLUMN IF NOT EXISTS costo_unitario_usd DOUBLE PRECISION;
+ALTER TABLE movimientos ADD COLUMN IF NOT EXISTS moneda_origen      TEXT;
+ALTER TABLE movimientos ADD COLUMN IF NOT EXISTS tasa_usada         DOUBLE PRECISION;
+
+-- Para el resumen del almacén por fecha de entrada (valor del inventario).
+CREATE INDEX IF NOT EXISTS idx_mov_fecha_tipo ON movimientos (tipo, fecha DESC);
+
 -- ---------- DINERO ----------
 
 CREATE TABLE IF NOT EXISTS caja (
@@ -890,3 +913,43 @@ CREATE TABLE IF NOT EXISTS credenciales (
   actualizado_en TIMESTAMPTZ DEFAULT NOW(),
   actualizado_por INTEGER REFERENCES usuarios(id)
 );
+
+-- ============================================================
+--  DINERO DISPONIBLE DEL NEGOCIO (Parte 2)
+-- ============================================================
+-- Cuánto dinero hay ahora mismo, separado por dónde está (efectivo o
+-- transferencia) y en qué moneda. El dueño lo declara y el sistema
+-- lleva la cuenta a partir de ahí.
+--
+-- Por qué una tabla de MOVIMIENTOS y no un simple saldo editable: si
+-- solo se guardara el número final, cada corrección borraría la
+-- anterior y nadie podría explicar por qué el efectivo bajó de 50 000 a
+-- 30 000. Aquí cada cambio deja su línea, y el saldo es la suma. Es la
+-- misma idea del libro contable: los saldos se calculan, no se guardan.
+CREATE TABLE IF NOT EXISTS dinero_movimientos (
+  id          SERIAL PRIMARY KEY,
+  forma       TEXT NOT NULL,            -- efectivo | transferencia
+  moneda      TEXT NOT NULL DEFAULT 'CUP',
+  monto       DOUBLE PRECISION NOT NULL, -- positivo suma, negativo resta
+  concepto    TEXT NOT NULL,
+  origen_tipo TEXT,                     -- ajuste | venta | gasto | traspaso
+  origen_id   INTEGER,
+  usuario_id  INTEGER REFERENCES usuarios(id),
+  fecha       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  nota        TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_dinero_fecha ON dinero_movimientos (fecha DESC);
+CREATE INDEX IF NOT EXISTS idx_dinero_saldo ON dinero_movimientos (forma, moneda);
+
+-- ============================================================
+--  DIRECCIÓN Y TELÉFONO DE LOS DESTINOS
+-- ============================================================
+-- Para el aviso por WhatsApp al transportista: sin la dirección, el
+-- mensaje no sirve de nada. Se guardan en el destino (almacén o
+-- vendedor) y no en cada transferencia, porque son datos del SITIO:
+-- repetirlos en cada envío obligaría a teclearlos veinte veces y a
+-- corregirlos veinte veces el día que el punto se mude.
+ALTER TABLE almacenes ADD COLUMN IF NOT EXISTS direccion TEXT;
+ALTER TABLE almacenes ADD COLUMN IF NOT EXISTS telefono  TEXT;
+ALTER TABLE usuarios  ADD COLUMN IF NOT EXISTS direccion TEXT;
+ALTER TABLE usuarios  ADD COLUMN IF NOT EXISTS telefono  TEXT;

@@ -227,6 +227,141 @@ router.get('/resumen', async (req, res) => {
   });
 });
 
+
+// ============================================================
+//  MÁRGENES: CENTRO DE ELABORACIÓN vs PUNTOS DE VENTA (Parte 4)
+//
+//  Son DOS negocios distintos y sus ganancias no se pueden mezclar:
+//
+//   · CENTRO DE ELABORACIÓN — gana por producir. Su margen es lo que
+//     vale el producto terminado menos lo que costó fabricarlo
+//     (ingredientes, según la receta). Se agrupa por FECHA DE PRODUCCIÓN.
+//
+//   · PUNTO DE VENTA — es otro negocio. Compra al centro a un precio y
+//     lo revende al público a otro. Su margen es el precio final menos
+//     el precio al que recibió la mercancía. Se agrupa por DÍA DE VENTA.
+//
+//  Sumarlos en un solo número escondería cuál de los dos gana dinero y
+//  cuál lo pierde, que es justo lo que el cliente quiere poder ver.
+//
+//  Los puntos de venta NO están en una lista: salen de quién hizo la
+//  venta. Por eso un punto nuevo aparece solo, con su nombre, sin que
+//  haya que tocar código — que es lo que se pidió.
+// ============================================================
+router.get('/margenes', async (req, res) => {
+  const rol = req.usuario?.rol;
+  if (!['dueno', 'admin', 'proveedor', 'contabilidad'].includes(rol)) {
+    return res.status(403).json({ error: 'No tiene permiso para ver los márgenes del negocio.' });
+  }
+
+  const { desde, hasta } = req.query;
+
+  // ---- Puntos de venta, por día y por punto ----
+  const condV = ["c.tipo = 'venta'"];
+  const paramsV = [];
+  if (desde) { condV.push('c.fecha >= ?'); paramsV.push(desde); }
+  if (hasta) { condV.push('c.fecha <= ?'); paramsV.push(`${hasta} 23:59:59`); }
+
+  const puntos = await db.prepare(`
+    -- El nombre bueno se busca en la tabla usuarios: la columna
+    -- usuario_nombre guarda el nombre de ACCESO cuando el token no traía
+    -- el nombre para mostrar, y ver "vend" en vez de "Vendedor" no le
+    -- sirve a nadie. Si el usuario ya no existe, se cae al nombre
+    -- archivado, que justamente para eso se guarda.
+    SELECT COALESCE(u.nombre, c.usuario_nombre, 'Sin asignar') AS punto,
+           (c.fecha AT TIME ZONE 'America/Havana')::date AS dia,
+           COALESCE(SUM(c.ingreso), 0)  AS ingreso,
+           COALESCE(SUM(c.costo), 0)    AS costo,
+           COALESCE(SUM(c.ganancia), 0) AS margen,
+           COUNT(*)                     AS lineas
+      FROM contabilidad_registros c
+      LEFT JOIN usuarios u ON u.id = c.usuario_id
+     WHERE ${condV.join(' AND ')}
+     GROUP BY 1, 2
+     ORDER BY 2 DESC, 1
+     LIMIT 400
+  `).all(...paramsV);
+
+  // ---- Centro de elaboración, por fecha de producción ----
+  // El valor de lo producido se toma del precio de costo del producto
+  // terminado (que es el precio al que sale hacia el punto de venta) por
+  // la cantidad. `producciones.costo_total` es lo que costaron los
+  // ingredientes de verdad, calculado al producir.
+  const condP = ['1 = 1'];
+  const paramsP = [];
+  if (desde) { condP.push('p.fecha >= ?'); paramsP.push(desde); }
+  if (hasta) { condP.push('p.fecha <= ?'); paramsP.push(`${hasta} 23:59:59`); }
+
+  const centro = await db.prepare(`
+    SELECT (p.fecha AT TIME ZONE 'America/Havana')::date AS dia,
+           COALESCE(SUM(p.cantidad_producida), 0) AS cantidad,
+           COALESCE(SUM(p.costo_total), 0)        AS costo,
+           COALESCE(SUM(p.cantidad_producida * COALESCE(pr.precio_costo, 0)), 0) AS valor_traspaso,
+           COUNT(*) AS producciones
+      FROM producciones p
+      LEFT JOIN productos pr ON pr.id = p.producto_final_id
+     WHERE ${condP.join(' AND ')}
+     GROUP BY 1
+     ORDER BY 1 DESC
+     LIMIT 400
+  `).all(...paramsP);
+
+  const r2 = (n) => Number((Number(n) || 0).toFixed(2));
+
+  const filasCentro = centro.map((f) => ({
+    dia: f.dia,
+    producciones: Number(f.producciones),
+    cantidad: r2(f.cantidad),
+    costo: r2(f.costo),
+    valor_traspaso: r2(f.valor_traspaso),
+    margen: r2(Number(f.valor_traspaso) - Number(f.costo)),
+  }));
+
+  const filasPuntos = puntos.map((f) => ({
+    punto: f.punto,
+    dia: f.dia,
+    ingreso: r2(f.ingreso),
+    costo: r2(f.costo),
+    margen: r2(f.margen),
+    lineas: Number(f.lineas),
+  }));
+
+  // Resumen por punto (sin desglose por día), que es como el dueño
+  // pregunta: "¿cuánto me dejó cada punto?".
+  const porPunto = new Map();
+  for (const f of filasPuntos) {
+    if (!porPunto.has(f.punto)) porPunto.set(f.punto, { punto: f.punto, ingreso: 0, costo: 0, margen: 0, dias: 0 });
+    const p = porPunto.get(f.punto);
+    p.ingreso += f.ingreso; p.costo += f.costo; p.margen += f.margen; p.dias += 1;
+  }
+
+  const totalCentro = filasCentro.reduce((s, f) => s + f.margen, 0);
+  const totalPuntos = filasPuntos.reduce((s, f) => s + f.margen, 0);
+
+  res.json({
+    centro: {
+      filas: filasCentro,
+      total_costo: r2(filasCentro.reduce((s, f) => s + f.costo, 0)),
+      total_traspaso: r2(filasCentro.reduce((s, f) => s + f.valor_traspaso, 0)),
+      total_margen: r2(totalCentro),
+    },
+    puntos: {
+      filas: filasPuntos,
+      resumen: [...porPunto.values()].map((p) => ({
+        ...p, ingreso: r2(p.ingreso), costo: r2(p.costo), margen: r2(p.margen),
+      })).sort((a, b) => b.margen - a.margen),
+      total_margen: r2(totalPuntos),
+    },
+    // Este SÍ se puede sumar: los dos márgenes están en la misma moneda y
+    // son de negocios distintos del mismo dueño. Lo que no se hace es
+    // presentarlo SOLO como un total, escondiendo de dónde viene cada parte.
+    total_negocio: r2(totalCentro + totalPuntos),
+    criterio: 'El centro gana por producir (valor de traspaso menos costo de los ingredientes) y '
+            + 'se agrupa por fecha de producción. Cada punto de venta gana por revender (precio '
+            + 'final menos el precio al que recibió) y se agrupa por día de venta.',
+  });
+});
+
 // ============================================================
 //  LIBRO — historial con fecha y hora, por tiempo indefinido
 // ============================================================

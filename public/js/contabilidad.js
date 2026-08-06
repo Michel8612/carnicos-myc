@@ -101,6 +101,8 @@ document.querySelectorAll('.tabs button').forEach((b) => {
     if (b.dataset.panel === 'pMovs') cargarMovimientos();
     if (b.dataset.panel === 'pGastos') cargarGastos();
     if (b.dataset.panel === 'pNomina') cargarNomina();
+    if (b.dataset.panel === 'pDinero') cargarDinero();
+    if (b.dataset.panel === 'pMargenes') cargarMargenes();
     if (b.dataset.panel === 'pTributacion') cargarTributacion();
   });
 });
@@ -299,7 +301,11 @@ document.getElementById('btnActualizar').addEventListener('click', (e) => {
   if (document.getElementById('pMovs').classList.contains('activo')) cargarMovimientos();
   if (document.getElementById('pGastos').classList.contains('activo')) cargarGastos();
   if (document.getElementById('pNomina').classList.contains('activo')) cargarNomina();
-  if (document.getElementById('pTributacion').classList.contains('activo')) cargarTributacion();
+  // La pestaña de Tributación se retiró de la vista: si no está en el HTML,
+  // no hay nada que recargar. Sin esta comprobación, getElementById devuelve
+  // null y el punto siguiente tumbaba el botón "Actualizar" entero.
+  const panelTrib = document.getElementById('pTributacion');
+  if (panelTrib && panelTrib.classList.contains('activo')) cargarTributacion();
 });
 
 // ---------- Gastos ----------
@@ -325,7 +331,15 @@ async function cargarCategoriasGasto() {
   try { categoriasGastoCache = await API.categoriasGasto(); }
   catch (e) { categoriasGastoCache = []; }
   const sel = document.getElementById('gCategoria');
-  sel.innerHTML = categoriasGastoCache.map((c) => `<option value="${esc(c.clave)}">${esc(c.etiqueta)}</option>`).join('');
+  // "Nómina" NO se ofrece aquí, aunque la categoría siga existiendo. Los pagos
+  // de nómina se registran en su propia pestaña, y esa pestaña YA crea el gasto
+  // correspondiente por dentro. Si además se pudiera teclear a mano como gasto
+  // suelto, el mismo sueldo entraría dos veces y el resultado del negocio
+  // saldría más bajo de lo real. Por eso se filtra de la lista, en vez de
+  // borrar la categoría: el historial de gastos viejos la sigue necesitando
+  // para mostrar su etiqueta.
+  const paraElegir = categoriasGastoCache.filter((c) => c.clave !== 'nomina');
+  sel.innerHTML = paraElegir.map((c) => `<option value="${esc(c.clave)}">${esc(c.etiqueta)}</option>`).join('');
   return categoriasGastoCache;
 }
 
@@ -520,7 +534,150 @@ document.getElementById('btnRegistrarNomina').addEventListener('click', async ()
   } catch (e) { alert('No se pudo registrar la nómina: ' + e.message); }
 });
 
-// ---------- Tributación (estimado, a partir de lo ya registrado) ----------
+// ============================================================
+//  DINERO DISPONIBLE (Parte 2)
+//
+//  Muestra un bloque por moneda con su efectivo y sus transferencias.
+//  NO hay un "total general" a propósito: sumar 300 USD con 41 500 CUP
+//  daría un número sin significado, y convertirlo todo a una moneda haría
+//  que el dinero del negocio pareciera subir o bajar solo cada vez que se
+//  mueve el dólar, sin que nadie hubiera cobrado ni pagado nada.
+// ============================================================
+const num2 = (n) => Number(n || 0).toLocaleString('es-ES', {
+  minimumFractionDigits: 2, maximumFractionDigits: 2,
+});
+
+async function cargarDinero() {
+  const cont = document.getElementById('dineroBalance');
+  if (!cont) return;
+  try {
+    const d = await API.dineroBalance();
+    document.getElementById('dineroAviso').textContent = d.aviso || '';
+    cont.innerHTML = (d.monedas || []).length
+      ? d.monedas.map((m) => `
+        <div class="dinero-moneda">
+          <div class="dinero-titulo">${esc(m.moneda)}</div>
+          <div class="dinero-cifras">
+            <div><span>Efectivo</span><strong>${num2(m.efectivo)}</strong></div>
+            <div><span>Transferencias</span><strong>${num2(m.transferencia)}</strong></div>
+            <div class="dinero-total"><span>Total en ${esc(m.moneda)}</span><strong>${num2(m.total)}</strong></div>
+          </div>
+        </div>`).join('')
+      : '<p class="vacio">Todavía no se ha registrado dinero. Use el formulario de abajo.</p>';
+  } catch (e) {
+    cont.innerHTML = `<p class="vacio">No se pudo cargar: ${esc(e.message)}</p>`;
+  }
+
+  try {
+    const movs = await API.dineroMovimientos({});
+    document.getElementById('tbDinero').innerHTML = movs.length
+      ? movs.map((f) => `<tr>
+          <td>${new Date(f.fecha).toLocaleDateString('es-CU')}</td>
+          <td class="izq">${esc(f.concepto)}</td>
+          <td>${esc(f.forma)}</td>
+          <td>${esc(f.moneda)}</td>
+          <td class="${Number(f.monto) < 0 ? 'g-neg' : 'g-pos'}">${num2(f.monto)}</td>
+          <td class="izq">${esc(f.usuario_nombre || '')}</td>
+        </tr>`).join('')
+      : '<tr><td colspan="6" class="vacio">Sin movimientos.</td></tr>';
+  } catch (e) { /* la tabla es secundaria: si falla, el balance ya se vio */ }
+}
+
+document.getElementById('btnDineroRegistrar').addEventListener('click', async () => {
+  const datos = {
+    forma: document.getElementById('dForma').value,
+    moneda: document.getElementById('dMoneda').value.trim().toUpperCase(),
+    monto: parseFloat(document.getElementById('dMonto').value),
+    concepto: document.getElementById('dConcepto').value.trim(),
+  };
+  try {
+    await API.dineroRegistrar(datos);
+    document.getElementById('dMonto').value = '';
+    document.getElementById('dConcepto').value = '';
+    await cargarDinero();
+  } catch (e) { alert(e.message); }
+});
+
+document.getElementById('btnDineroAjustar').addEventListener('click', async () => {
+  const datos = {
+    forma: document.getElementById('aForma').value,
+    moneda: document.getElementById('aMoneda').value.trim().toUpperCase(),
+    saldo: parseFloat(document.getElementById('aSaldo').value),
+    motivo: document.getElementById('aMotivo').value.trim(),
+  };
+  try {
+    const r = await API.dineroAjustar(datos);
+    alert(r.sin_cambios
+      ? 'El saldo ya coincidía: no hizo falta ningún ajuste.'
+      : `Cuadrado. Se anotó una diferencia de ${num2(r.diferencia)}.`);
+    document.getElementById('aSaldo').value = '';
+    document.getElementById('aMotivo').value = '';
+    await cargarDinero();
+  } catch (e) { alert(e.message); }
+});
+
+// ============================================================
+//  MÁRGENES (Parte 4)
+//
+//  Se muestran SEPARADOS a propósito: el centro de elaboración y cada
+//  punto de venta son negocios distintos. Un total único escondería si
+//  el que gana es uno y el otro está perdiendo, que es justo lo que hay
+//  que poder ver.
+// ============================================================
+async function cargarMargenes() {
+  const params = {};
+  const d1 = document.getElementById('mgDesde').value;
+  const d2 = document.getElementById('mgHasta').value;
+  if (d1) params.desde = d1;
+  if (d2) params.hasta = d2;
+
+  let d;
+  try { d = await API.margenes(params); }
+  catch (e) { alert('No se pudieron cargar los márgenes: ' + e.message); return; }
+
+  document.getElementById('margenCriterio').textContent = d.criterio || '';
+  document.getElementById('mgCentro').textContent = money(d.centro.total_margen);
+  document.getElementById('mgPuntos').textContent = money(d.puntos.total_margen);
+  document.getElementById('mgTotal').textContent = money(d.total_negocio);
+
+  document.getElementById('tbMgPuntos').innerHTML = d.puntos.resumen.length
+    ? d.puntos.resumen.map((p) => `<tr>
+        <td class="izq"><b>${esc(p.punto)}</b></td><td>${p.dias}</td>
+        <td>${money(p.ingreso)}</td><td>${money(p.costo)}</td><td>${gan(p.margen)}</td>
+      </tr>`).join('')
+    : '<tr><td colspan="5" class="vacio">Todavía no hay ventas registradas.</td></tr>';
+
+  document.getElementById('tbMgDias').innerHTML = d.puntos.filas.length
+    ? d.puntos.filas.map((f) => `<tr>
+        <td>${String(f.dia).slice(0, 10).split('-').reverse().join('/')}</td>
+        <td class="izq">${esc(f.punto)}</td>
+        <td>${money(f.ingreso)}</td><td>${money(f.costo)}</td><td>${gan(f.margen)}</td>
+      </tr>`).join('')
+    : '<tr><td colspan="5" class="vacio">Sin ventas en el período.</td></tr>';
+
+  document.getElementById('tbMgCentro').innerHTML = d.centro.filas.length
+    ? d.centro.filas.map((f) => `<tr>
+        <td>${String(f.dia).slice(0, 10).split('-').reverse().join('/')}</td>
+        <td>${f.producciones}</td><td>${num(f.cantidad)}</td>
+        <td>${money(f.costo)}</td><td>${money(f.valor_traspaso)}</td><td>${gan(f.margen)}</td>
+      </tr>`).join('')
+    : '<tr><td colspan="6" class="vacio">Sin producciones en el período.</td></tr>';
+}
+
+document.getElementById('btnMargenes').addEventListener('click', cargarMargenes);
+
+// ---------- Tributación (estimado) — RETIRADA DE LA VISTA (agosto 2026) ----------
+// El cliente la lleva con VERSAT, así que su pestaña se quitó del HTML. El
+// código se conserva entero y se enciende solo si algún día vuelve la pestaña.
+//
+// Va dentro de una función con salida temprana por un motivo concreto: aquí
+// abajo hay varios addEventListener sobre elementos de esa pestaña. Al no
+// existir ya, el primero lanzaría un TypeError y, como es un script clásico,
+// ese error detendría la ejecución del resto del archivo — dejando la pantalla
+// de Contabilidad entera sin funcionar.
+(function inicializarTributacion() {
+  if (!document.getElementById('pTributacion')) return;
+
 let regimenesTributariosCache = null; // se llena una vez con GET /tributacion/regimenes
 let ultimoPeriodoTributacion = null;  // { desde, hasta } del último cálculo mostrado
 
@@ -849,5 +1006,7 @@ async function cargarCorreccionesVigentes() {
     });
   });
 }
+
+})();
 
 cargarResumen();

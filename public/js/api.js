@@ -149,6 +149,9 @@ const API = {
   editarProducto: (id, d) => apiFetch('/inventario/productos/' + id, { method: 'PUT', body: JSON.stringify(d) }),
   eliminarProducto: (id) => apiFetch('/inventario/productos/' + id, { method: 'DELETE' }),
   registrarMovimiento: (d) => apiFetch('/inventario/movimientos', { method: 'POST', body: JSON.stringify(d) }),
+  // Valor del inventario y entradas por fecha. Devuelve 403 a quien no sea
+  // dueño o contabilidad: el almacenero trabaja con cantidades, no con dinero.
+  valorInventario: (p) => apiFetch('/inventario/valor?' + new URLSearchParams(p || {}).toString()),
 
   // --- Recetas ---
   recetas: () => apiFetch('/recetas'),
@@ -169,7 +172,10 @@ const API = {
   ventaProductoEditar: (id, d) => apiFetch(`/ventas/producto/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
   ventaProductoBorrar: (id) => apiFetch(`/ventas/producto/${id}`, { method: 'DELETE' }),
   ventaVendido: (id, vendido) => apiFetch(`/ventas/vendido/${id}`, { method: 'POST', body: JSON.stringify({ vendido }) }),
+  // El cierre admite con qué se cobró: { forma_pago:'efectivo'|'transferencia', moneda:'CUP' }.
+  // Sin esos datos se asume efectivo en CUP, como funcionaba antes.
   ventasReiniciar: (d) => apiFetch('/ventas/reiniciar', { method: 'POST', body: JSON.stringify(d || {}) }),
+  ingresosPorPunto: (p) => apiFetch('/ventas/ingresos-por-punto?' + new URLSearchParams(p || {}).toString()),
 
   // --- Usuarios: eliminar y reasignar su área ---
   usuarioAreaInfo: (id) => apiFetch(`/usuarios/${id}/area-info`),
@@ -205,6 +211,9 @@ const API = {
   contabBorrarLinea: (id) => apiFetch(`/contabilidad/libro/${id}`, { method: 'DELETE' }),
   contabBorrarVarias: (d) => apiFetch('/contabilidad/libro/borrar', { method: 'POST', body: JSON.stringify(d) }),
   contabMovimientos: () => apiFetch('/contabilidad/movimientos'),
+  // Márgenes separados: centro de elaboración (por fecha de producción) y
+  // cada punto de venta (por día de venta). No se mezclan a propósito.
+  margenes: (p) => apiFetch('/contabilidad/margenes?' + new URLSearchParams(p || {}).toString()),
   cobrar: (id, monto, moneda) => apiFetch(`/ventas/${id}/cobrar`, { method: 'POST', body: JSON.stringify({ monto, moneda }) }),
 
   // --- Usuarios ---
@@ -219,6 +228,9 @@ const API = {
 
   // --- Transferencias entre áreas (almacén → almacén / → vendedor) ---
   destinosTransferencia: () => apiFetch('/inventario/destinos'),
+  // Dirección y teléfono del destino, para el aviso al transportista.
+  guardarDireccionDestino: (tipo, id, d) =>
+    apiFetch(`/inventario/destinos/${tipo}/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
   transferenciasPendientes: () => apiFetch('/inventario/transferencias/pendientes'),
   transferenciasHistorial: () => apiFetch('/inventario/transferencias'),
   aceptarTransferencia: (id) => apiFetch(`/inventario/transferencias/${id}/aceptar`, { method: 'POST' }),
@@ -294,6 +306,12 @@ const API = {
   guardarCredencial: (clave, valor) =>
     apiFetch(`/credenciales/${clave}`, { method: 'PUT', body: JSON.stringify({ valor }) }),
   borrarCredencial: (clave) => apiFetch(`/credenciales/${clave}`, { method: 'DELETE' }),
+
+  // ---- Dinero disponible del negocio (efectivo y transferencias) ----
+  dineroBalance: () => apiFetch('/dinero'),
+  dineroMovimientos: (p) => apiFetch('/dinero/movimientos?' + new URLSearchParams(p || {}).toString()),
+  dineroRegistrar: (d) => apiFetch('/dinero', { method: 'POST', body: JSON.stringify(d) }),
+  dineroAjustar: (d) => apiFetch('/dinero/ajustar', { method: 'PUT', body: JSON.stringify(d) }),
 
   // ---- Avisos ----
   avisos: () => apiFetch('/notificaciones'),

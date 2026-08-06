@@ -104,3 +104,13 @@ tr:nth-child(even) {
     font-size: 14px;
   }
 }
+
+/* ---------- Dinero disponible ---------- */
+.dinero-moneda { background:#fff; border-radius:12px; padding:14px; margin:10px 0;
+  box-shadow:0 3px 10px rgba(0,0,0,.1); }
+.dinero-titulo { font-weight:bold; color:#283593; font-size:16px; margin-bottom:8px; }
+.dinero-cifras { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; }
+.dinero-cifras div { text-align:center; }
+.dinero-cifras span { display:block; font-size:12px; color:#78909c; }
+.dinero-cifras strong { font-size:19px; color:#37474f; }
+.dinero-total strong { color:#1565C0; }

@@ -180,6 +180,11 @@ router.delete('/categorias/:clave', async (req, res) => {
 // ------------------------------------------------------------
 router.post('/gastos', async (req, res) => {
   const { categoria, concepto, monto, moneda, nota } = req.body;
+  // De dónde sale el dinero. Por defecto efectivo: es lo habitual y así
+  // el registro de gastos de siempre sigue funcionando sin cambios.
+  const formaPago = ['efectivo', 'transferencia'].includes(req.body?.forma_pago)
+    ? req.body.forma_pago
+    : 'efectivo';
   if (!categoria || !concepto || !monto) {
     return res.status(400).json({ error: 'Indique categoría, concepto y monto.' });
   }
@@ -202,6 +207,18 @@ router.post('/gastos', async (req, res) => {
       INSERT INTO caja (tipo, concepto, monto, moneda, origen_tipo, origen_id, usuario_id)
       VALUES ('egreso', ?, ?, ?, 'gasto', ?, ?)
     `).run(concepto, Number(monto), mon, r.lastInsertRowid, req.usuario.id);
+
+    // Y restarlo del dinero disponible (Parte 2), EN SU PROPIA MONEDA Y
+    // FORMA: un gasto pagado por transferencia en CUP sale de
+    // transferencias-CUP, no del efectivo. El monto va en negativo
+    // porque el saldo es la suma de los movimientos.
+    await db.prepare(`
+      INSERT INTO dinero_movimientos (forma, moneda, monto, concepto, origen_tipo, origen_id, usuario_id, nota)
+      VALUES (?, ?, ?, ?, 'gasto', ?, ?, ?)
+    `).run(
+      formaPago, mon, -Math.abs(Number(monto)),
+      `Gasto — ${concepto}`, r.lastInsertRowid, req.usuario.id, nota || null,
+    );
     return r.lastInsertRowid;
   });
 

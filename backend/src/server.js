@@ -49,6 +49,7 @@ import legalRoutes from './routes/legal.js';
 import respaldosRoutes from './routes/respaldos.js';
 import notificacionesRoutes from './routes/notificaciones.js';
 import credencialesRoutes from './routes/credenciales.js';
+import dineroRoutes from './routes/dinero.js';
 import informesRoutes from './routes/informes.js';
 import tableroRoutes from './routes/tablero.js';
 import cuentasRoutes from './routes/cuentas.js';
@@ -172,6 +173,10 @@ app.use('/api/conciliaciones', requiereSesion, escrituraSoloRoles('almacen', 'al
 // Credenciales de servicios externos (elTOQUE, Transfermóvil...). Solo
 // el dueño: aquí se guardan claves de terceros.
 app.use('/api/credenciales', requiereSesion, escrituraSoloRoles(), credencialesRoutes);
+// Dinero disponible del negocio: cuánto hay en efectivo y en transferencias,
+// por moneda. Lo declara el dueño; contabilidad también escribe porque es
+// quien cuadra la caja. El almacenero y ventas no pintan nada aquí.
+app.use('/api/dinero', requiereSesion, escrituraSoloRoles('contabilidad'), dineroRoutes);
 
 // ---- Middleware de errores: cualquier fallo en una ruta cae aquí ----
 // Devuelve un JSON claro con 500 en vez de tumbar el servidor.

@@ -95,10 +95,7 @@
          "contabilidad" no pasa por el panel de administración: si sus
          pantallas nuevas solo se enlazaran desde allí, no las vería nunca. -->
     <p class="cont-accesos">
-      <a href="informes.html">📄 Informes</a>
       <a href="cuentas.html">🧾 Cobros y pagos</a>
-      <a href="presupuestos.html">🎯 Presupuestos</a>
-      <a href="tablero.html">📈 Indicadores</a>
       <a href="avisos.html">🔔 Avisos</a>
     </p>
 
@@ -143,7 +140,12 @@
       <button data-panel="pMovs">Movimientos de almacén</button>
       <button data-panel="pGastos">Gastos</button>
       <button data-panel="pNomina">Nómina</button>
-      <button data-panel="pTributacion">Tributación</button>
+      <button data-panel="pDinero">Dinero disponible</button>
+      <button data-panel="pMargenes">Márgenes</button>
+      <!-- Tributación retirada por decisión del cliente (agosto 2026): la
+           lleva la económica con VERSAT, así que aquí solo estorbaba. La
+           pestaña y su sección se quitaron de la vista; las rutas del
+           servidor siguen intactas por si hiciera falta recuperarla. -->
     </div>
 
     <!-- ALMACÉN -->
@@ -252,9 +254,10 @@
     <section class="panel" id="pGastos">
       <h3 class="seccion">Registrar gasto</h3>
       <p class="sub">
-        Lo que se registre aquí es lo que la pestaña <b>Tributación</b> cuenta como gasto
-        deducible. Electricidad, alquiler, materia prima, nómina, etc.: todo lo que sale de
-        caja debe quedar anotado aquí para que el estimado de impuestos sea real.
+        Todo lo que sale de caja debe quedar anotado aquí: electricidad, alquiler, materia
+        prima, transporte… Así el resultado del negocio refleja lo que de verdad se gastó.
+        <b>La nómina no se registra aquí</b>: se paga desde su propia pestaña, que ya
+        anota el gasto sola. Si se pusiera también a mano, el mismo sueldo contaría dos veces.
       </p>
       <div class="filtros">
         <div>
@@ -363,162 +366,114 @@
         </table>
       </div>
     </section>
+    <!-- La sección de TRIBUTACIÓN se retiró de la vista en agosto de 2026 por
+         decisión del cliente: la lleva la económica con VERSAT. Se quitó el
+         HTML, no el motor: las rutas /api/contabilidad/tributacion* siguen
+         funcionando y probadas, por si algún día hace falta devolverla o la
+         quiere otro cliente. -->
 
-    <!-- TRIBUTACIÓN -->
-    <section class="panel" id="pTributacion">
-      <h3 class="seccion">Tributación (estimado)</h3>
+    <!-- DINERO DISPONIBLE -->
+    <section class="panel" id="pDinero">
+      <h3 class="seccion">¿Cuánto dinero hay y dónde está?</h3>
+      <p class="sub" id="dineroAviso"></p>
+
+      <div id="dineroBalance"></div>
+
+      <h3 class="seccion">Registrar entrada o salida de dinero</h3>
       <p class="sub">
-        Cálculo estimado a partir de lo ya registrado en el sistema (entradas bancarias, gastos,
-        nómina). No hay que volver a teclear nada. Los <b>ingresos</b> son solo las entradas de
-        dinero en las cuentas bancarias (ya NO cuentan ventas, almacén ni producción).
+        Ponga el monto en positivo si entra dinero y en negativo si sale.
+        Cada movimiento queda anotado: el saldo es la suma de todos, nunca
+        un número que se sobrescribe.
       </p>
-      <div class="aviso-legal">
-        <b>Aviso importante:</b> <span id="tribAvisoLegal">Los porcentajes son valores de referencia y deben confirmarse con la ONAT o un contador antes de declarar o pagar impuestos reales.</span>
-      </div>
-
-      <div class="fila-selectores">
+      <div class="filtros">
         <div>
-          <label>Tipo de empresa</label>
-          <select id="tTipoEmpresa">
-            <option value="microempresa">Microempresa</option>
-            <option value="pequena_empresa">Pequeña empresa</option>
-            <option value="mediana_empresa">Mediana empresa</option>
-            <option value="otro">Otro (defínalo usted)</option>
+          <label>Dónde está</label>
+          <select id="dForma">
+            <option value="efectivo">Efectivo</option>
+            <option value="transferencia">Transferencia</option>
           </select>
         </div>
         <div>
-          <label>Período</label>
-          <select id="tPeriodo">
-            <option value="mes">Mes en curso</option>
-            <option value="trimestre">Trimestre en curso</option>
-            <option value="ano">Año en curso</option>
-            <option value="rango">Rango personalizado</option>
+          <label>Moneda</label>
+          <input type="text" id="dMoneda" value="CUP" maxlength="6" style="width:90px;text-transform:uppercase;">
+        </div>
+        <div><label>Monto</label><input type="number" id="dMonto" step="0.01" placeholder="0.00"></div>
+        <div><label>Concepto</label><input type="text" id="dConcepto" placeholder="Ej. Cobro del día"></div>
+        <button class="b-filtrar" id="btnDineroRegistrar">Registrar</button>
+      </div>
+
+      <h3 class="seccion">Cuadrar por conteo</h3>
+      <p class="sub">
+        Cuente el dinero que tiene de verdad y escriba la cifra. El sistema
+        anota la diferencia como un ajuste, con su motivo, en vez de borrar
+        el historial: así un descuadre se puede investigar más adelante.
+      </p>
+      <div class="filtros">
+        <div>
+          <label>Dónde está</label>
+          <select id="aForma">
+            <option value="efectivo">Efectivo</option>
+            <option value="transferencia">Transferencia</option>
           </select>
         </div>
-        <div id="tRangoDesdeWrap" class="oculto"><label>Desde</label><input type="date" id="tDesde"></div>
-        <div id="tRangoHastaWrap" class="oculto"><label>Hasta</label><input type="date" id="tHasta"></div>
-        <button id="btnCalcularTributacion">Calcular</button>
-      </div>
-
-      <!-- Régimen "Otro": el usuario define a mano sus propios tributos -->
-      <div id="panelRegimenOtro" class="oculto">
-        <h3 class="seccion" style="margin-top:0;">Régimen "Otro" — configúrelo a mano</h3>
-        <p class="sub">
-          Añada los tributos que necesite: nombre, sobre qué se calcula (base) y el porcentaje.
-          Se guarda y se usa en los cálculos futuros hasta que lo cambie de nuevo.
-        </p>
-        <div class="tabla-scroll">
-          <table class="datos">
-            <thead>
-              <tr><th class="izq">Nombre del tributo</th><th>Base</th><th>Porcentaje</th><th>Mínimo exento</th><th></th></tr>
-            </thead>
-            <tbody id="tbRegimenOtro"></tbody>
-          </table>
+        <div>
+          <label>Moneda</label>
+          <input type="text" id="aMoneda" value="CUP" maxlength="6" style="width:90px;text-transform:uppercase;">
         </div>
-        <p style="margin:10px 0;">
-          <button class="b-gris" id="btnAnadirTributoOtro" type="button">+ Añadir tributo</button>
-          <button class="b-verde" id="btnGuardarRegimenOtro" type="button">Guardar régimen</button>
-        </p>
+        <div><label>Saldo contado</label><input type="number" id="aSaldo" step="0.01" min="0" placeholder="0.00"></div>
+        <div><label>Motivo</label><input type="text" id="aMotivo" placeholder="Ej. Faltante al cerrar"></div>
+        <button class="b-filtrar" id="btnDineroAjustar">Cuadrar</button>
       </div>
 
-      <p class="sub" id="tribResumenPeriodo"></p>
+      <h3 class="seccion">Últimos movimientos de dinero</h3>
+      <div class="tabla-scroll">
+        <table class="datos">
+          <thead>
+            <tr><th>Fecha</th><th class="izq">Concepto</th><th>Dónde</th><th>Moneda</th><th>Monto</th><th class="izq">Quién</th></tr>
+          </thead>
+          <tbody id="tbDinero"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- MÁRGENES: centro de elaboración vs puntos de venta -->
+    <section class="panel" id="pMargenes">
+      <h3 class="seccion">¿Dónde se está ganando el dinero?</h3>
+      <p class="sub" id="margenCriterio"></p>
+
+      <div class="filtros">
+        <div><label>Desde</label><input type="date" id="mgDesde"></div>
+        <div><label>Hasta</label><input type="date" id="mgHasta"></div>
+        <button class="b-filtrar" id="btnMargenes">Ver</button>
+      </div>
 
       <div class="tarjetas">
-        <div class="tarjeta c-azul" id="tarjVentasBrutas">
-          <div class="n">
-            <span id="tVentasBrutas">0.00</span>
-            <button class="btn-lapiz" data-clave="ventas_brutas" data-etiqueta="Ingresos bancarios" title="Corregir esta cifra">✎</button>
-          </div>
-          <div class="l">Ingresos bancarios</div>
-          <div class="marca-corregido oculto" id="mVentasBrutas"></div>
-        </div>
-        <div class="tarjeta c-rojo" id="tarjGastosDeducibles">
-          <div class="n">
-            <span id="tGastosDeducibles">0.00</span>
-            <button class="btn-lapiz" data-clave="gastos_deducibles" data-etiqueta="Gastos deducibles" title="Corregir esta cifra">✎</button>
-          </div>
-          <div class="l">Gastos deducibles</div>
-          <div class="marca-corregido oculto" id="mGastosDeducibles"></div>
-        </div>
-        <div class="tarjeta c-verde" id="tarjUtilidadNeta">
-          <div class="n">
-            <span id="tUtilidadNeta">0.00</span>
-            <button class="btn-lapiz" data-clave="utilidad_neta" data-etiqueta="Utilidad neta" title="Corregir esta cifra">✎</button>
-          </div>
-          <div class="l">Utilidad neta</div>
-          <div class="marca-corregido oculto" id="mUtilidadNeta"></div>
-        </div>
-        <div class="tarjeta c-gris" id="tarjBaseImponible">
-          <div class="n">
-            <span id="tBaseImponible">0.00</span>
-            <button class="btn-lapiz" data-clave="base_imponible" data-etiqueta="Base imponible" title="Corregir esta cifra">✎</button>
-          </div>
-          <div class="l">Base imponible</div>
-          <div class="marca-corregido oculto" id="mBaseImponible"></div>
-        </div>
-        <div class="tarjeta c-destacada"><div class="n" id="tTotalTributar">0.00</div><div class="l">Total a tributar (estimado)</div></div>
+        <div class="tarjeta c-morado"><div class="n" id="mgCentro">0.00</div><div class="l">Margen del centro de elaboración</div></div>
+        <div class="tarjeta c-azul"><div class="n" id="mgPuntos">0.00</div><div class="l">Margen de los puntos de venta</div></div>
+        <div class="tarjeta c-verde"><div class="n" id="mgTotal">0.00</div><div class="l">Margen total del negocio</div></div>
       </div>
 
-      <h3 class="seccion">Tributos aplicados — <span id="tribRegimenNombre"></span></h3>
+      <h3 class="seccion">Por punto de venta</h3>
       <div class="tabla-scroll">
         <table class="datos">
-          <thead>
-            <tr>
-              <th class="izq">Tributo</th><th>Base</th><th>Valor de la base</th><th>Porcentaje</th><th>Importe</th>
-            </tr>
-          </thead>
-          <tbody id="tbTributos"></tbody>
+          <thead><tr><th class="izq">Punto de venta</th><th>Días con venta</th><th>Ingreso</th><th>Costo recibido</th><th>Margen</th></tr></thead>
+          <tbody id="tbMgPuntos"></tbody>
         </table>
       </div>
 
-      <h3 class="seccion">Correcciones vigentes en este período</h3>
+      <h3 class="seccion">Puntos de venta, día a día</h3>
       <div class="tabla-scroll">
         <table class="datos">
-          <thead>
-            <tr><th class="izq">Cifra</th><th>Anterior</th><th>Nuevo</th><th class="izq">Motivo</th><th>Autor</th><th>Fecha</th><th></th></tr>
-          </thead>
-          <tbody id="tbCorrecciones"></tbody>
+          <thead><tr><th>Día</th><th class="izq">Punto</th><th>Ingreso</th><th>Costo</th><th>Margen</th></tr></thead>
+          <tbody id="tbMgDias"></tbody>
         </table>
       </div>
 
-      <h3 class="seccion">Gastos deducibles por categoría</h3>
+      <h3 class="seccion">Centro de elaboración, por fecha de producción</h3>
       <div class="tabla-scroll">
         <table class="datos">
-          <thead><tr><th class="izq">Categoría</th><th>Total</th></tr></thead>
-          <tbody id="tbGastosCategoria"></tbody>
-        </table>
-      </div>
-
-      <h3 class="seccion">Ingresos por cuenta bancaria</h3>
-      <p class="sub">Desglose de las entradas de dinero del período, por cuenta.</p>
-      <div class="tabla-scroll">
-        <table class="datos">
-          <thead><tr><th class="izq">Cuenta</th><th>Total</th></tr></thead>
-          <tbody id="tbIngresosCuenta"></tbody>
-        </table>
-      </div>
-
-      <h3 class="seccion">Advertencias</h3>
-      <ul class="lista-advertencias" id="tribAdvertencias"></ul>
-
-      <h3 class="seccion">Historial de cálculos guardados</h3>
-      <p class="sub">
-        Cada vez que guarde el cálculo de arriba queda una línea fija con fecha y hora, para
-        consultar más adelante lo que se declaró en un período aunque después cambien los
-        gastos o ingresos registrados. Borrar una línea es solo del dueño/admin/proveedor.
-      </p>
-      <p style="margin:10px 0;">
-        <button class="b-verde" id="btnGuardarHistorial" type="button">Guardar este cálculo en el historial</button>
-      </p>
-      <div class="tabla-scroll">
-        <table class="datos">
-          <thead>
-            <tr>
-              <th>Fecha</th><th class="izq">Período</th><th>Ingresos</th><th>Gastos</th>
-              <th>Base imponible</th><th>Tributo</th><th class="izq">Usuario</th><th></th>
-            </tr>
-          </thead>
-          <tbody id="tbHistorialTrib"></tbody>
+          <thead><tr><th>Fecha</th><th>Producciones</th><th>Cantidad</th><th>Costo de producir</th><th>Valor de traspaso</th><th>Margen</th></tr></thead>
+          <tbody id="tbMgCentro"></tbody>
         </table>
       </div>
     </section>

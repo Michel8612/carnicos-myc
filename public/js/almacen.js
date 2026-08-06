@@ -25,6 +25,15 @@ const unidadProductoSelect = document.getElementById('unidadProducto');
 const contadorProductos = document.getElementById('contadorProductos');
 const contadorAlmacenes = document.getElementById('contadorAlmacenes');
 
+// En qué moneda tecleó el usuario el costo de la entrada. Es la moneda en
+// que se pagó DE VERDAD; la otra casilla es solo su equivalencia. Empieza
+// en CUP porque es lo habitual aquí, y así nunca llega sin valor al envío.
+let monedaTecleada = 'CUP';
+
+// Destinos con su dirección y teléfono, tal como los devolvió el servidor.
+// Se guardan aquí para armar el aviso al transportista al enviar mercancía.
+let destinosCache = [];
+
 const TIPO_LABEL = {
   materia_prima: 'Materia prima',
   terminado: 'Terminado',
@@ -113,6 +122,9 @@ function cargarDestinos() {
   if (!destino) return;
   return API.destinosTransferencia().then((resp) => {
     const destinos = (resp && resp.destinos) || [];
+    // Se recuerdan enteros (con dirección y teléfono) para poder armar
+    // el aviso de WhatsApp sin volver a preguntarle al servidor.
+    destinosCache = destinos;
     const almacenes = destinos.filter((d) => d.tipo === 'almacen');
     const vendedores = destinos.filter((d) => d.tipo === 'ventas');
 
@@ -161,9 +173,14 @@ movimientoForm.addEventListener('submit', (e) => {
   // se indicó) para dejar rastro en la tabla de compras. Todo opcional.
   if (tipo === 'entrada') {
     const prov = document.getElementById('movProveedor');
-    const costo = document.getElementById('movCostoUnitario');
+    const costoCup = parseFloat((document.getElementById('movCostoUnitario') || {}).value);
+    const costoUsd = parseFloat((document.getElementById('movCostoUsd') || {}).value);
     if (prov && prov.value.trim()) datos.proveedor = prov.value.trim();
-    if (costo && parseFloat(costo.value) > 0) datos.costo_unitario = parseFloat(costo.value);
+    if (costoCup > 0) datos.costo_cup = costoCup;
+    if (costoUsd > 0) datos.costo_usd = costoUsd;
+    // En cuál se pagó DE VERDAD: la que el usuario tecleó primero. Si
+    // escribió las dos, manda la que tocó, que quedó marcada al convertir.
+    if (costoCup > 0 || costoUsd > 0) datos.moneda_origen = monedaTecleada;
   }
 
   if (!datos.producto_id || !datos.almacen_id || !datos.cantidad) {
@@ -173,6 +190,12 @@ movimientoForm.addEventListener('submit', (e) => {
 
   API.registrarMovimiento(datos)
     .then(() => {
+      // Si la mercancía va a otro sitio, hay que moverla físicamente:
+      // se ofrece avisar al transportista antes de limpiar el formulario,
+      // que es cuando todavía se sabe qué se envió.
+      if (tipo === 'salida' && datos.destino_tipo && datos.destino_id) {
+        try { ofrecerAvisoTransporte(datos); } catch (e) { /* el aviso nunca puede tumbar el registro */ }
+      }
       movimientoForm.reset();
       if (bloqueDestino) bloqueDestino.classList.add('hidden');
       const bc = document.getElementById('bloqueCompra');
@@ -555,7 +578,204 @@ function cargarTodo() {
   cargarHistorialMovimientos();   // historial de entradas/salidas/ajustes
 }
 
+// ============================================================
+//  COSTO EN LAS DOS MONEDAS (CUP y USD)
+//
+//  Al escribir en una casilla, la otra se rellena sola con la tasa del
+//  día. No es solo comodidad: casi nadie sabe de memoria a cuánto sale
+//  en dólares lo que acaba de comprar en pesos, y ese número hace falta
+//  para el valor del inventario.
+//
+//  Se recuerda CUÁL tecleó el usuario (`monedaTecleada`) porque esa es la
+//  moneda en que se pagó de verdad; la otra es una equivalencia. El
+//  servidor lo necesita para saber, más tarde, cuánto del inventario se
+//  compró en dólares y cuánto en pesos.
+//
+//  Si el usuario corrige las DOS a mano, se respetan tal cual: esa compra
+//  se hizo a otro cambio y el sistema no debe "arreglarla".
+// ============================================================
+let tasaDelDia = null;
+
+async function prepararCostoEnDosMonedas() {
+  const cup = document.getElementById('movCostoUnitario');
+  const usd = document.getElementById('movCostoUsd');
+  const nota = document.getElementById('notaTasa');
+  if (!cup || !usd || !nota) return;
+
+  try {
+    const t = await API.tasaActual();
+    if (t && t.disponible && Number(t.valor) > 0) {
+      tasaDelDia = Number(t.valor);
+      nota.textContent = `Tasa de hoy: 1 USD = ${tasaDelDia.toLocaleString('es-ES')} CUP`
+        + (t.fuente ? ` (${t.fuente})` : '')
+        + '. Escriba en una casilla y la otra se calcula sola.';
+      nota.className = 'nota-tasa';
+    } else {
+      throw new Error('sin tasa');
+    }
+  } catch (e) {
+    // Sin tasa NO se inventa una equivalencia: se avisa y se deja que
+    // escriba lo que sepa. Un número inventado en contabilidad es peor
+    // que un hueco.
+    tasaDelDia = null;
+    nota.textContent = 'No hay tasa del dólar ahora mismo. Puede escribir el costo en una moneda '
+      + 'o en las dos, pero no se calculará la equivalencia.';
+    nota.className = 'nota-tasa nota-aviso';
+  }
+
+  const convertir = (desde, hacia, factor) => {
+    monedaTecleada = desde === cup ? 'CUP' : 'USD';
+    if (!tasaDelDia) return;               // sin tasa, no se toca la otra casilla
+    if (desde.dataset.manual === '1') return;
+    const v = parseFloat(desde.value);
+    if (!(v > 0)) { if (hacia.dataset.manual !== '1') hacia.value = ''; return; }
+    // La otra casilla es un cálculo, no algo que el usuario escribió: si
+    // él la edita después, se marca como manual y se deja en paz.
+    if (hacia.dataset.manual !== '1') hacia.value = factor(v).toFixed(2);
+  };
+
+  cup.addEventListener('input', () => { cup.dataset.manual = ''; convertir(cup, usd, (v) => v / tasaDelDia); });
+  usd.addEventListener('input', () => { usd.dataset.manual = ''; convertir(usd, cup, (v) => v * tasaDelDia); });
+  // Marcar como "escrita a mano" la casilla que el usuario toca en segundo
+  // lugar, para que la conversión deje de pisarla.
+  cup.addEventListener('change', () => { if (usd.value) cup.dataset.manual = '1'; });
+  usd.addEventListener('change', () => { if (cup.value) usd.dataset.manual = '1'; });
+}
+
+// ============================================================
+//  VALOR DEL INVENTARIO (Parte 7)
+//
+//  Quién lo ve lo decide EL SERVIDOR, no esta pantalla: /inventario/valor
+//  responde 403 a quien no sea dueño o contabilidad. Aquí solo se pinta si
+//  llegaron datos. Ocultarlo únicamente con CSS no protegería nada: los
+//  números habrían viajado igual al navegador y se leerían con dos clics.
+// ============================================================
+async function cargarValorInventario() {
+  const bloque = document.getElementById('bloqueValor');
+  if (!bloque) return;
+
+  let d;
+  try {
+    d = await API.valorInventario();
+  } catch (e) {
+    // 403 es lo NORMAL para el almacenero: no es un fallo que haya que
+    // enseñar. Se deja la sección oculta y a trabajar.
+    return;
+  }
+
+  const num = (n, dec = 2) => Number(n || 0).toLocaleString('es-ES', {
+    minimumFractionDigits: dec, maximumFractionDigits: dec,
+  });
+
+  document.getElementById('valInvCup').textContent = num(d.inventario.cup);
+  document.getElementById('valInvUsd').textContent = num(d.inventario.usd);
+  document.getElementById('valInvProductos').textContent = num(d.inventario.productos, 0);
+  document.getElementById('valCriterio').textContent = d.inventario.criterio || '';
+
+  // Si algún producto se valoró por su precio de ficha en vez de por
+  // compras reales, hay que decirlo: es la diferencia entre un dato y
+  // una estimación, y quien mira la cifra tiene derecho a saberlo.
+  const sinCosto = Number(d.inventario.productos_sin_costo) || 0;
+  document.getElementById('valInvSinCosto').textContent = sinCosto
+    ? `${sinCosto} sin compras registradas`
+    : 'todos con compras registradas';
+
+  const filas = d.por_fecha || [];
+  document.getElementById('tbValorFechas').innerHTML = filas.length
+    ? filas.map((f) => {
+        const fecha = String(f.fecha).slice(0, 10).split('-').reverse().join('/');
+        // Las entradas viejas no llevan costo (son anteriores a esta
+        // función). Se marca en vez de mostrar un cero que engañaría.
+        const aviso = f.sin_costo
+          ? ` <small class="sin-costo" title="Entradas sin costo declarado">(${f.sin_costo} sin costo)</small>`
+          : '';
+        return `<tr>
+          <td>${fecha}</td>
+          <td>${num(f.entradas, 0)}${aviso}</td>
+          <td>${num(f.cantidad, 3)}</td>
+          <td>${num(f.valor_cup)}</td>
+          <td>${num(f.valor_usd)}</td>
+        </tr>`;
+      }).join('')
+    : '<tr><td colspan="5" style="text-align:center;color:#78909c;">Todavía no hay entradas registradas.</td></tr>';
+
+  bloque.classList.remove('hidden');
+}
+
+// ============================================================
+//  AVISO AL TRANSPORTISTA POR WHATSAPP
+//
+//  Cuando sale mercancía hacia un punto de venta, alguien tiene que
+//  moverla. Este botón arma el mensaje con lo que hay que llevar y a
+//  dónde, y abre WhatsApp para mandarlo.
+//
+//  Por qué NO se envía solo desde el servidor: el sistema vive en
+//  Netlify (en la nube) y no puede hablar con un WhatsApp que está en
+//  una PC de la casa. Y usar la API oficial de Meta obliga a verificar
+//  el negocio y a usar plantillas aprobadas. Abrir WhatsApp con el texto
+//  ya escrito funciona hoy, desde el propio teléfono del almacenero, sin
+//  depender de nada encendido — y de paso una persona ve el mensaje
+//  antes de que salga, que para algo que moviliza a un transportista es
+//  una ventaja y no un estorbo.
+//
+//  Si algún día se automatiza, el texto ya está en un solo sitio
+//  (`textoAviso`) y solo cambia quién aprieta el botón.
+// ============================================================
+function textoAviso({ producto, cantidad, unidad, destino, almacenOrigen }) {
+  const lineas = [
+    '*ENVÍO DE MERCANCÍA*',
+    '',
+    `Producto: ${producto}`,
+    `Cantidad: ${cantidad}${unidad ? ' ' + unidad : ''}`,
+    '',
+    `Desde: ${almacenOrigen || 'Almacén'}`,
+    `Hacia: ${destino.nombre}`,
+  ];
+  // La dirección es lo que de verdad necesita el transportista. Si falta,
+  // se dice con todas las letras en vez de mandar un mensaje incompleto
+  // que obligue a llamar por teléfono para preguntarla.
+  lineas.push(destino.direccion
+    ? `Dirección: ${destino.direccion}`
+    : 'Dirección: (NO REGISTRADA — hace falta ponerla en el sistema)');
+  if (destino.telefono) lineas.push(`Teléfono: ${destino.telefono}`);
+  lineas.push('', `Fecha: ${new Date().toLocaleString('es-CU')}`);
+  return lineas.join(String.fromCharCode(10));
+}
+
+function ofrecerAvisoTransporte(datos) {
+  const destino = destinosCache.find(
+    (d) => d.tipo === datos.destino_tipo && Number(d.id) === Number(datos.destino_id),
+  );
+  if (!destino) return;
+
+  const producto = movProductoSelect.options[movProductoSelect.selectedIndex]?.text || 'Producto';
+  const almacenOrigen = movAlmacenSelect.options[movAlmacenSelect.selectedIndex]?.text || '';
+
+  if (!destino.direccion) {
+    const dir = prompt(
+      `"${destino.nombre}" no tiene dirección registrada.`
+      + ' Escríbala ahora y quedará guardada para los próximos envíos'
+      + ' (o deje vacío para mandar el aviso sin ella):', '');
+    if (dir && dir.trim()) {
+      destino.direccion = dir.trim();
+      API.guardarDireccionDestino(destino.tipo, destino.id, { direccion: destino.direccion, telefono: destino.telefono })
+        .catch(() => { /* si no se pudo guardar, el aviso se manda igual */ });
+    }
+  }
+
+  const texto = textoAviso({
+    producto, cantidad: datos.cantidad, unidad: '', destino, almacenOrigen,
+  });
+
+  if (!confirm('Envío registrado. ¿Quiere avisar al transportista por WhatsApp?')) return;
+  // Sin número: WhatsApp abre y el usuario elige a quién se lo manda.
+  // Es lo que se quiere aquí, porque el transportista cambia según el día.
+  window.open('https://wa.me/?text=' + encodeURIComponent(texto), '_blank');
+}
+
 // Carga inicial
 cargarUnidades();
 cargarFiltroAlmacenMovimientos();
 cargarTodo();
+prepararCostoEnDosMonedas();
+cargarValorInventario();

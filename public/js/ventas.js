@@ -192,8 +192,23 @@ async function eliminar(id, nombre) {
 document.getElementById('btnReiniciar').addEventListener('click', async () => {
   if (!confirm('¿Hacer el cierre diario?\n\nSe descuenta lo vendido de la cantidad, queda registrado en Contabilidad y el conteo de vendido vuelve a cero.')) return;
   try {
-    const r = await API.ventasReiniciar(verUsuarioId ? { usuario_id: verUsuarioId } : {});
-    alert(`Cierre diario hecho.\n\nVenta: ${money(r.total_dinero)}\nCosto: ${money(r.total_costo)}\nGanancia: ${money(r.total_ganancia)}\n\nYa aparece en Contabilidad.`);
+    // Con qué se cobró la jornada. Hace falta para que el dinero entre en
+    // el sitio correcto del balance: no es lo mismo tener 12 500 en la mano
+    // que en la tarjeta, y el dueño necesita poder distinguirlo.
+    const forma = prompt(
+      '¿Cómo se cobró la mayor parte del día?\n\nEscriba 1 para EFECTIVO o 2 para TRANSFERENCIA.',
+      '1',
+    );
+    if (forma === null) return;   // canceló: no se cierra nada
+    const formaPago = String(forma).trim() === '2' ? 'transferencia' : 'efectivo';
+    const monedaTxt = (prompt('¿En qué moneda? (CUP, USD, EUR…)', 'CUP') || 'CUP').trim().toUpperCase();
+
+    const r = await API.ventasReiniciar({
+      ...(verUsuarioId ? { usuario_id: verUsuarioId } : {}),
+      forma_pago: formaPago,
+      moneda: monedaTxt || 'CUP',
+    });
+    alert(`Cierre diario hecho.\n\nVenta: ${money(r.total_dinero)}\nCosto: ${money(r.total_costo)}\nGanancia: ${money(r.total_ganancia)}\n\nCobrado en ${r.moneda} por ${r.forma_pago}.\nYa aparece en Contabilidad y en el dinero disponible.`);
     await cargar();
     // Si el vendedor está mirando "Cierres anteriores", que el que
     // acaba de hacer aparezca de una vez, sin tener que cambiar de

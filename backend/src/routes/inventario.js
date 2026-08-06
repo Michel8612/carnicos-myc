@@ -11,6 +11,7 @@ import db from '../db/index.js';
 import { requiereSesion } from '../middleware/auth.js';
 import { anotar } from '../libro.js';
 import { auditar } from '../auditoria.js';
+import { resolverCosto } from '../servicios/monedas.js';
 
 const router = Router();
 router.use(requiereSesion);
@@ -69,6 +70,40 @@ async function nombreDeUsuario(id) {
 // ---------- Productos ----------
 
 // Lista de productos con su unidad.
+
+// ------------------------------------------------------------
+//  QUITAR EL DINERO DE LAS RESPUESTAS (Parte 6)
+//
+//  El almacenero trabaja con productos, cantidades y unidades: los
+//  precios y costos no son asunto suyo. Se quitan AQUÍ, en el servidor,
+//  y no escondiéndolos con CSS en la pantalla: si el servidor los
+//  enviara igual, bastarían dos clics en el navegador para leerlos, y
+//  eso no sería ocultarlos sino disimularlos.
+//
+//  El dueño, el proveedor y contabilidad los siguen viendo enteros. El
+//  almacén central también es almacén: tampoco ve dinero.
+// ------------------------------------------------------------
+const CAMPOS_DE_DINERO = [
+  'precio_costo', 'precio_venta', 'costo_unitario', 'costo',
+  'costo_unitario_cup', 'costo_unitario_usd', 'tasa_usada',
+  'valor_costo', 'valor_venta', 'ganancia_potencial',
+];
+
+function puedeVerDinero(rol) {
+  return ES_ADMIN_TOTAL(rol) || rol === 'contabilidad';
+}
+
+function sinDinero(datos, rol) {
+  if (puedeVerDinero(rol)) return datos;
+  const limpiar = (o) => {
+    if (!o || typeof o !== 'object') return o;
+    const copia = { ...o };
+    for (const c of CAMPOS_DE_DINERO) delete copia[c];
+    return copia;
+  };
+  return Array.isArray(datos) ? datos.map(limpiar) : limpiar(datos);
+}
+
 router.get('/productos', async (req, res) => {
   const filas = await db.prepare(`
     SELECT p.*, u.abreviatura AS unidad
@@ -77,7 +112,7 @@ router.get('/productos', async (req, res) => {
     WHERE p.activo = 1
     ORDER BY p.nombre
   `).all();
-  res.json(filas);
+  res.json(sinDinero(filas, req.usuario?.rol));
 });
 
 // Crear producto nuevo (el dueño amplía su catálogo sin tocar código).
@@ -250,7 +285,7 @@ router.get('/existencias', async (req, res) => {
     return { ...p, consumo_diario: Number(porDia.toFixed(2)), dias_restantes: diasRestantes, fecha_agotamiento: fechaAgotamiento, estado };
   });
 
-  res.json(resultado);
+  res.json(sinDinero(resultado, req.usuario?.rol));
 });
 
 // ---------- Registrar un movimiento ----------
@@ -289,6 +324,9 @@ async function moverExistencia(productoId, almacenId, delta) {
 // Si no viene nada de destino, es una salida simple.
 router.post('/movimientos', async (req, res) => {
   const { producto_id, almacen_id, tipo, cantidad, nota, destino_texto, proveedor, costo_unitario } = req.body;
+  // Costo en las dos monedas. `costo_unitario` se sigue admitiendo como
+  // antes (se entiende en CUP) para no romper lo que ya llamaba a esta ruta.
+  const { costo_cup, costo_usd, moneda_origen, tasa } = req.body;
   let { destino_tipo, destino_id } = req.body;
   if (!destino_id && req.body.destino_almacen_id) {
     destino_tipo = 'almacen';
@@ -322,12 +360,33 @@ router.post('/movimientos', async (req, res) => {
   let transferenciaId = null;
   let destinoNombreParaNota = null;
 
+  // El costo se resuelve ANTES de abrir la transacción: consultar la tasa
+  // puede tardar (sale a internet) y no conviene tener la conexión de la
+  // base retenida mientras tanto.
+  //
+  // Solo se archiva costo en las ENTRADAS. Una salida o un ajuste no
+  // compran nada: ponerles precio de compra ensuciaría el valor del
+  // inventario, que se calcula sumando lo que entró.
+  const costo = tipo === 'entrada'
+    ? await resolverCosto({
+        costo_cup: costo_cup ?? costo_unitario,
+        costo_usd,
+        moneda_origen,
+        tasa,
+      })
+    : { cup: null, usd: null, moneda_origen: null, tasa: null, aviso: null };
+
   const tx = db.transaction(async () => {
     // 1) Movimiento principal (entrada/salida/ajuste) en el almacén de origen.
     await db.prepare(`
-      INSERT INTO movimientos (producto_id, almacen_id, tipo, cantidad, origen_tipo, usuario_id, nota)
-      VALUES (?, ?, ?, ?, 'manual', ?, ?)
-    `).run(producto_id, almacen_id, tipo, cant, req.usuario.id, nota || null);
+      INSERT INTO movimientos (
+        producto_id, almacen_id, tipo, cantidad, origen_tipo, usuario_id, nota,
+        costo_unitario_cup, costo_unitario_usd, moneda_origen, tasa_usada
+      ) VALUES (?, ?, ?, ?, 'manual', ?, ?, ?, ?, ?, ?)
+    `).run(
+      producto_id, almacen_id, tipo, cant, req.usuario.id, nota || null,
+      costo.cup, costo.usd, costo.moneda_origen, costo.tasa,
+    );
 
     const delta = tipo === 'salida' ? -cant : cant;
     await moverExistencia(producto_id, almacen_id, delta);
@@ -340,13 +399,28 @@ router.post('/movimientos', async (req, res) => {
     //      inventario), por eso no genera gasto ni asiento de costo.
     if (tipo === 'entrada' && proveedor && String(proveedor).trim()) {
       const prod = await db.prepare('SELECT precio_costo FROM productos WHERE id = ?').get(producto_id);
-      const costoUnit = Number(costo_unitario) > 0
-        ? Number(costo_unitario)
-        : Number(prod?.precio_costo) || 0;
+      // El costo en CUP es el de referencia para el total de la compra; si no
+      // se declaró ninguno, se cae al precio de costo que ya tenga el producto.
+      const costoUnit = costo.cup ?? (Number(prod?.precio_costo) || 0);
+      // `moneda` y `tasa_cambio` existían en la tabla pero iban fijas en
+      // 'CUP' y 1: ahora guardan lo que realmente se pagó. Así una compra
+      // hecha en dólares deja constancia de que lo fue.
+      //
+      // OJO CON LA LECTURA: `costo_total` va SIEMPRE en CUP, también cuando
+      // `moneda` dice 'USD'. `moneda` no describe a `costo_total`, sino la
+      // moneda en que se pagó de verdad. Se mantiene así porque todo lo que
+      // ya lee esta tabla (tributación, informes) suma en moneda nacional, y
+      // cambiar la unidad a mitad del historial mezclaría pesos con dólares
+      // en la misma columna. El importe original se recupera dividiendo:
+      // costo_total / tasa_cambio.
       const compra = await db.prepare(`
-        INSERT INTO compras (tipo, proveedor, almacen_id, costo_total, moneda, referencia, usuario_id)
-        VALUES ('nacional', ?, ?, ?, 'CUP', ?, ?)
-      `).run(String(proveedor).trim(), almacen_id, cant * costoUnit, nota || null, req.usuario.id);
+        INSERT INTO compras (tipo, proveedor, almacen_id, costo_total, moneda, tasa_cambio, referencia, usuario_id)
+        VALUES ('nacional', ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        String(proveedor).trim(), almacen_id, cant * costoUnit,
+        costo.moneda_origen || 'CUP', costo.tasa ?? 1,
+        nota || null, req.usuario.id,
+      );
       await db.prepare(`
         INSERT INTO compras_detalle (compra_id, producto_id, cantidad, costo_unitario)
         VALUES (?, ?, ?, ?)
@@ -442,7 +516,18 @@ router.post('/movimientos', async (req, res) => {
       });
     }
 
-    res.json({ ok: true, transferencia_id: transferenciaId });
+    // Se devuelve el costo tal como quedó archivado (los dos importes y la
+    // tasa) para que la pantalla pueda confirmarle al usuario a qué cambio
+    // se guardó, y el aviso si no se pudo convertir por falta de tasa.
+    res.json({
+      ok: true,
+      transferencia_id: transferenciaId,
+      costo: {
+        cup: costo.cup, usd: costo.usd,
+        moneda_origen: costo.moneda_origen, tasa: costo.tasa,
+      },
+      aviso: costo.aviso,
+    });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -492,7 +577,7 @@ router.get('/movimientos', async (req, res) => {
     LIMIT 300
   `).all(...params);
 
-  res.json(filas);
+  res.json(sinDinero(filas, req.usuario?.rol));
 });
 
 // Borrar una línea del historial de movimientos.
@@ -563,21 +648,188 @@ router.delete('/movimientos/:id', async (req, res) => {
 // todos los almacenes + todos los vendedores activos. Se consulta en
 // vivo (nada cacheado) para que aparezca de inmediato cualquier almacén
 // o vendedor creado después. Cualquiera con sesión puede verlo (GET).
+// ------------------------------------------------------------
+//  VALOR DEL INVENTARIO Y ENTRADAS POR FECHA (Parte 7)
+//
+//  Responde dos preguntas distintas que conviene no mezclar:
+//
+//   1. "¿Cuánto compré y cuándo?"  -> `por_fecha` y `compras`. Es un dato
+//      EXACTO: sale de lo que quedó archivado en cada entrada, con su
+//      importe en las dos monedas y la tasa de aquel día.
+//
+//   2. "¿Cuánto vale lo que tengo hoy?" -> `inventario`. Es una
+//      ESTIMACIÓN, y hay que decirlo. Lo que hay en existencia no se
+//      puede casar con las entradas concretas de las que salió: no se
+//      lleva lotes, y la mercancía entra y sale mezclada. Se valora al
+//      costo medio de compra de cada producto, que es el criterio
+//      habitual y el único que los datos permiten sostener.
+//
+//  Solo lo ve quien puede ver dinero: el almacenero trabaja con
+//  cantidades, no con costos (ver Parte 6).
+// ------------------------------------------------------------
+router.get('/valor', async (req, res) => {
+  const rol = req.usuario?.rol;
+  if (!ES_ADMIN_TOTAL(rol) && rol !== 'contabilidad') {
+    return res.status(403).json({ error: 'No tiene permiso para ver los valores del inventario.' });
+  }
+
+  const { desde, hasta, almacen_id } = req.query;
+  const cond = ["m.tipo = 'entrada'"];
+  const params = [];
+  if (desde) { cond.push('m.fecha >= ?'); params.push(desde); }
+  if (hasta) { cond.push('m.fecha <= ?'); params.push(`${hasta} 23:59:59`); }
+  if (almacen_id) { cond.push('m.almacen_id = ?'); params.push(Number(almacen_id)); }
+  const where = `WHERE ${cond.join(' AND ')}`;
+
+  // ---- Entradas agrupadas por día ----
+  // Se agrupa en hora de Cuba: si se usara UTC, lo que entró a las 8 de
+  // la noche aparecería con la fecha del día siguiente.
+  const porFecha = await db.prepare(`
+    SELECT (m.fecha AT TIME ZONE 'America/Havana')::date AS fecha,
+           COUNT(*)                                            AS entradas,
+           COALESCE(SUM(m.cantidad), 0)                        AS cantidad,
+           COALESCE(SUM(m.cantidad * COALESCE(m.costo_unitario_cup, 0)), 0) AS valor_cup,
+           COALESCE(SUM(m.cantidad * COALESCE(m.costo_unitario_usd, 0)), 0) AS valor_usd,
+           COUNT(*) FILTER (WHERE m.costo_unitario_cup IS NULL) AS sin_costo
+      FROM movimientos m
+      ${where}
+     GROUP BY 1
+     ORDER BY 1 DESC
+     LIMIT 180
+  `).all(...params);
+
+  // ---- Lo comprado, separado por la moneda en que se PAGÓ ----
+  const porMoneda = await db.prepare(`
+    SELECT COALESCE(m.moneda_origen, 'CUP') AS moneda,
+           COALESCE(SUM(m.cantidad * COALESCE(m.costo_unitario_cup, 0)), 0) AS cup,
+           COALESCE(SUM(m.cantidad * COALESCE(m.costo_unitario_usd, 0)), 0) AS usd
+      FROM movimientos m
+      ${where}
+       AND m.costo_unitario_cup IS NOT NULL
+     GROUP BY 1
+  `).all(...params);
+
+  // ---- Valor de lo que hay HOY en existencia ----
+  // El costo medio sale de las entradas que SÍ declararon costo. Para el
+  // USD no se usa la tasa de hoy: se usa la tasa media a la que se compró
+  // ese producto, que es lo que de verdad costó en dólares.
+  const filas = await db.prepare(`
+    WITH costos AS (
+      SELECT producto_id,
+             SUM(cantidad * costo_unitario_cup) / NULLIF(SUM(cantidad), 0) AS medio_cup,
+             SUM(cantidad * costo_unitario_usd) / NULLIF(SUM(cantidad), 0) AS medio_usd
+        FROM movimientos
+       WHERE tipo = 'entrada' AND costo_unitario_cup IS NOT NULL
+       GROUP BY producto_id
+    )
+    SELECT p.id, p.nombre, COALESCE(SUM(e.cantidad), 0) AS cantidad,
+           c.medio_cup, c.medio_usd, p.precio_costo
+      FROM productos p
+      JOIN existencias e ON e.producto_id = p.id
+      LEFT JOIN costos c ON c.producto_id = p.id
+     WHERE p.activo = 1 ${almacen_id ? 'AND e.almacen_id = ?' : ''}
+     GROUP BY p.id, p.nombre, c.medio_cup, c.medio_usd, p.precio_costo
+    HAVING COALESCE(SUM(e.cantidad), 0) > 0
+  `).all(...(almacen_id ? [Number(almacen_id)] : []));
+
+  let invCup = 0, invUsd = 0, sinCosto = 0;
+  for (const f of filas) {
+    const cantidad = Number(f.cantidad) || 0;
+    // Si el producto nunca tuvo una entrada con costo, se cae a su
+    // precio de costo de ficha. Se cuenta aparte para poder avisarlo.
+    const medioCup = f.medio_cup != null ? Number(f.medio_cup) : Number(f.precio_costo) || 0;
+    if (f.medio_cup == null) sinCosto += 1;
+    invCup += cantidad * medioCup;
+    // El USD solo se suma si ese producto se compró alguna vez con
+    // importe en dólares. No se convierte a la tasa de hoy: eso haría
+    // que el valor del inventario cambiara solo cada mañana.
+    if (f.medio_usd != null) invUsd += cantidad * Number(f.medio_usd);
+  }
+
+  const redondear = (n) => Number((Number(n) || 0).toFixed(2));
+
+  res.json({
+    inventario: {
+      cup: redondear(invCup),
+      usd: redondear(invUsd),
+      productos: filas.length,
+      productos_sin_costo: sinCosto,
+      criterio: 'Es el mismo inventario visto en dos monedas, no dos cifras que se sumen. '
+              + 'Cada producto se valora al costo medio de sus compras, y el importe en '
+              + 'dólares usa la tasa a la que se compró de verdad, no la de hoy: por eso '
+              + 'no cambia solo cuando se mueve el dólar.',
+    },
+    compras: {
+      cup: redondear(porMoneda.reduce((s, f) => s + Number(f.cup), 0)),
+      usd: redondear(porMoneda.reduce((s, f) => s + Number(f.usd), 0)),
+      por_moneda: porMoneda.map((f) => ({
+        moneda: f.moneda, cup: redondear(f.cup), usd: redondear(f.usd),
+      })),
+    },
+    por_fecha: porFecha.map((f) => ({
+      fecha: f.fecha,
+      entradas: Number(f.entradas),
+      cantidad: redondear(f.cantidad),
+      valor_cup: redondear(f.valor_cup),
+      valor_usd: redondear(f.valor_usd),
+      sin_costo: Number(f.sin_costo),
+    })),
+  });
+});
+
+
+// ---------- PUT /destinos/:tipo/:id : dirección y teléfono ----------
+// Hacen falta para el aviso al transportista. Se editan aquí y no en una
+// pantalla aparte porque es donde se usan: quien manda la mercancía es
+// quien se da cuenta de que falta la dirección.
+router.put('/destinos/:tipo/:id', async (req, res) => {
+  const { tipo, id } = req.params;
+  if (!['almacen', 'ventas'].includes(tipo)) {
+    return res.status(400).json({ error: 'Tipo de destino no válido.' });
+  }
+  const direccion = (req.body?.direccion ?? '').toString().trim() || null;
+  const telefono = (req.body?.telefono ?? '').toString().trim() || null;
+
+  const tabla = tipo === 'almacen' ? 'almacenes' : 'usuarios';
+  const antes = await db.prepare(`SELECT id, nombre, direccion, telefono FROM ${tabla} WHERE id = ?`).get(Number(id));
+  if (!antes) return res.status(404).json({ error: 'Ese destino no existe.' });
+
+  await db.prepare(`UPDATE ${tabla} SET direccion = ?, telefono = ? WHERE id = ?`)
+    .run(direccion, telefono, Number(id));
+
+  await auditar({
+    modulo: 'almacen', accion: 'modificar', req, entidad: tabla, entidad_id: Number(id),
+    descripcion: `Dirección/teléfono de ${antes.nombre}`,
+    antes, despues: { ...antes, direccion, telefono },
+  });
+
+  res.json({ ok: true, direccion, telefono });
+});
+
 router.get('/destinos', async (req, res) => {
   // Si quien consulta es un almacenero con almacén propio, no tiene
   // sentido que se ofrezca a sí mismo como destino de su propia salida.
   const origenId = almacenDeLaSesion(req);
 
-  const almacenes = await db.prepare('SELECT id, nombre FROM almacenes ORDER BY nombre').all();
+  // Se traen también dirección y teléfono: con ellos la pantalla arma el
+  // aviso de WhatsApp para el transportista sin tener que pedir el dato a
+  // mano en cada envío. No son datos sensibles (el almacenero tiene que
+  // saber a dónde manda la mercancía), así que no se filtran por rol.
+  const almacenes = await db.prepare(
+    'SELECT id, nombre, direccion, telefono FROM almacenes ORDER BY nombre'
+  ).all();
   const vendedores = await db.prepare(
-    "SELECT id, nombre FROM usuarios WHERE activo = 1 AND rol = 'ventas' ORDER BY nombre"
+    "SELECT id, nombre, direccion, telefono FROM usuarios WHERE activo = 1 AND rol = 'ventas' ORDER BY nombre"
   ).all();
 
   const destinos = [
     ...almacenes
       .filter((a) => !origenId || Number(a.id) !== Number(origenId))
-      .map((a) => ({ tipo: 'almacen', id: a.id, nombre: a.nombre })),
-    ...vendedores.map((v) => ({ tipo: 'ventas', id: v.id, nombre: `${v.nombre} (Ventas)` })),
+      .map((a) => ({ tipo: 'almacen', id: a.id, nombre: a.nombre, direccion: a.direccion, telefono: a.telefono })),
+    ...vendedores.map((v) => ({
+      tipo: 'ventas', id: v.id, nombre: `${v.nombre} (Ventas)`,
+      direccion: v.direccion, telefono: v.telefono,
+    })),
   ];
 
   res.json({ destinos });
@@ -608,7 +860,7 @@ router.get('/transferencias/pendientes', async (req, res) => {
       ORDER BY fecha_envio DESC
     `).all(req.usuario.id);
   }
-  res.json(filas);
+  res.json(sinDinero(filas, req.usuario?.rol));
 });
 
 // Historial completo de transferencias (últimas 200, más recientes
@@ -617,7 +869,7 @@ router.get('/transferencias', async (req, res) => {
   const filas = await db.prepare(
     'SELECT * FROM transferencias ORDER BY fecha_envio DESC LIMIT 200'
   ).all();
-  res.json(filas);
+  res.json(sinDinero(filas, req.usuario?.rol));
 });
 
 // Aceptar una transferencia pendiente: entra de verdad al destino.
