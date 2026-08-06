@@ -767,10 +767,73 @@ function ofrecerAvisoTransporte(datos) {
     producto, cantidad: datos.cantidad, unidad: '', destino, almacenOrigen,
   });
 
-  if (!confirm('Envío registrado. ¿Quiere avisar al transportista por WhatsApp?')) return;
-  // Sin número: WhatsApp abre y el usuario elige a quién se lo manda.
-  // Es lo que se quiere aquí, porque el transportista cambia según el día.
-  window.open('https://wa.me/?text=' + encodeURIComponent(texto), '_blank');
+  mostrarAviso(texto);
+}
+
+// Muestra el aviso como un ENLACE de verdad que el usuario pulsa.
+//
+// Antes esto abría WhatsApp con window.open() nada más responder el
+// servidor. El problema: en ese momento el navegador ya no considera que
+// la acción venga de un clic, y el bloqueador de ventanas emergentes lo
+// corta — sobre todo en Chrome de Android, que es justo donde está el
+// almacenero. Fallaba a veces sí y a veces no, la peor forma de fallar.
+//
+// Un clic sobre un <a> real nunca se bloquea. Además así el aviso no
+// desaparece: queda en pantalla hasta que se cierra, por si el almacenero
+// se distrae o se equivoca de contacto y necesita volver a mandarlo.
+function mostrarAviso(texto) {
+  document.getElementById('avisoTransporte')?.remove();
+
+  const caja = document.createElement('div');
+  caja.id = 'avisoTransporte';
+  caja.className = 'aviso-transporte';
+
+  const titulo = document.createElement('p');
+  titulo.className = 'at-titulo';
+  titulo.textContent = 'Envío registrado. Avise al transportista:';
+
+  // El texto se mete con textContent, nunca con innerHTML: lleva el
+  // nombre del producto y la dirección, que los escribe el usuario.
+  const previa = document.createElement('pre');
+  previa.className = 'at-mensaje';
+  previa.textContent = texto;
+
+  const enlace = document.createElement('a');
+  enlace.className = 'at-boton';
+  enlace.href = 'https://wa.me/?text=' + encodeURIComponent(texto);
+  enlace.target = '_blank';
+  enlace.rel = 'noopener';
+  enlace.textContent = 'Enviar por WhatsApp';
+
+  const copiar = document.createElement('button');
+  copiar.type = 'button';
+  copiar.className = 'at-copiar';
+  copiar.textContent = 'Copiar mensaje';
+  copiar.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(texto);
+      copiar.textContent = 'Copiado';
+    } catch {
+      // Sin permiso de portapapeles el texto sigue a la vista arriba:
+      // se puede seleccionar y copiar a mano.
+      copiar.textContent = 'Copie el texto de arriba';
+    }
+  });
+
+  const cerrar = document.createElement('button');
+  cerrar.type = 'button';
+  cerrar.className = 'at-cerrar';
+  cerrar.textContent = '✕';
+  cerrar.setAttribute('aria-label', 'Cerrar aviso');
+  cerrar.addEventListener('click', () => caja.remove());
+
+  const acciones = document.createElement('div');
+  acciones.className = 'at-acciones';
+  acciones.append(enlace, copiar);
+
+  caja.append(cerrar, titulo, previa, acciones);
+  movimientoForm.parentNode.insertBefore(caja, movimientoForm.nextSibling);
+  caja.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 // Carga inicial
