@@ -528,6 +528,11 @@ function cargarExistencias() {
       const tr = document.createElement('tr');
 
       // Miniatura del producto; si no tiene foto, un recuadro neutro (no rompe la fila).
+      // Al almacenero el servidor NO le manda los precios (ver Parte 6).
+      // En ese caso se pone una raya y no un 0.00: un cero se lee como
+      // "este producto no cuesta nada", que es peor que no decir nada.
+      const tieneCosto = producto.precio_costo !== undefined && producto.precio_costo !== null;
+
       const miniatura = producto.imagen
         ? `<img src="${producto.imagen}" class="rec-miniatura" alt="">`
         : `<span class="rec-miniatura rec-miniatura-vacia"></span>`;
@@ -538,7 +543,8 @@ function cargarExistencias() {
         <td>${TIPO_LABEL[producto.tipo] || producto.tipo}</td>
         <td>${producto.unidad || ''}</td>
         <td>${producto.cantidad}</td>
-        <td>${Number(producto.precio_costo || 0).toFixed(2)}</td>
+        <td>${tieneCosto ? Number(producto.precio_costo).toFixed(2) : '—'}</td>
+        <td class="costo-usd" data-cup="${tieneCosto ? producto.precio_costo : ''}">—</td>
         <td>
           <button onclick="eliminarProducto(${producto.id})">Eliminar</button>
         </td>
@@ -550,6 +556,8 @@ function cargarExistencias() {
 
       almacenList.appendChild(tr);
     });
+
+    pintarCostosUsd();
   }).catch((error) => {
     console.error('Error al cargar existencias:', error);
   });
@@ -610,6 +618,8 @@ async function prepararCostoEnDosMonedas() {
         + (t.fuente ? ` (${t.fuente})` : '')
         + '. Escriba en una casilla y la otra se calcula sola.';
       nota.className = 'nota-tasa';
+      // La tabla ya puede estar pintada: se rellenan sus celdas de USD.
+      pintarCostosUsd();
     } else {
       throw new Error('sin tasa');
     }
@@ -621,6 +631,7 @@ async function prepararCostoEnDosMonedas() {
     nota.textContent = 'No hay tasa del dólar ahora mismo. Puede escribir el costo en una moneda '
       + 'o en las dos, pero no se calculará la equivalencia.';
     nota.className = 'nota-tasa nota-aviso';
+    pintarCostosUsd();
   }
 
   const convertir = (desde, hacia, factor) => {
@@ -834,6 +845,37 @@ function mostrarAviso(texto) {
   caja.append(cerrar, titulo, previa, acciones);
   movimientoForm.parentNode.insertBefore(caja, movimientoForm.nextSibling);
   caja.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// ============================================================
+//  COSTO EN DÓLARES DE CADA PRODUCTO (columna "Costo USD")
+//
+//  Es el costo actual del producto convertido a la tasa de elTOQUE de
+//  HOY. Sirve para decidir compras: saber que una libra sale a 1.78 USD
+//  dice más, cuando se compra en el extranjero, que verla en pesos.
+//
+//  OJO — esto NO es lo mismo que el costo archivado de cada entrada.
+//  Aquel se congela con la tasa del día de la compra y no se recalcula
+//  nunca (si no, la contabilidad se movería sola). Esta columna es una
+//  referencia en vivo, y por eso cambia cuando cambia el dólar.
+//
+//  Se pinta aparte del resto de la fila porque la tasa llega por
+//  internet: la tabla no puede quedarse esperándola. Primero se ve el
+//  almacén y, cuando la tasa entra, se rellenan las celdas.
+// ============================================================
+function pintarCostosUsd() {
+  document.querySelectorAll('#almacenList .costo-usd').forEach((celda) => {
+    const cup = parseFloat(celda.dataset.cup);
+    if (!tasaDelDia || !(cup > 0)) {
+      // Sin tasa, o sin costo que convertir, se deja la raya. No se
+      // inventa una equivalencia ni se muestra un cero engañoso.
+      celda.textContent = !(cup > 0) ? '—' : 'sin tasa';
+      celda.title = !(cup > 0) ? '' : 'No hay tasa del dólar ahora mismo';
+      return;
+    }
+    celda.textContent = (cup / tasaDelDia).toFixed(2);
+    celda.title = `A la tasa de hoy: 1 USD = ${tasaDelDia} CUP`;
+  });
 }
 
 // Carga inicial

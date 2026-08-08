@@ -598,3 +598,8 @@ h1, h2 {
   font-size: 18px; cursor: pointer; padding: 4px 8px; line-height: 1;
 }
 .at-cerrar:hover { color: #1b5e20; }
+
+/* Costo en dólares: mismo peso visual que el costo en pesos, pero en
+   verde para que se lea de un vistazo que es la otra moneda y no un
+   segundo importe que se sume. */
+#almacenList .costo-usd { color: #2e7d32; font-weight: bold; white-space: nowrap; }
