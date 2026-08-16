@@ -61,6 +61,20 @@ async function columnasPorTabla() {
 // Las auto-referencias (p.ej. una categoría con padre_id que apunta a
 // la misma tabla) no cuentan como dependencia ENTRE tablas, así que
 // se descartan aquí.
+// Igual que relacionesFk(), pero a nivel de COLUMNA: hace falta para poder
+// dejar en blanco justo el campo que cierra un circulo entre dos tablas.
+async function columnasFk() {
+  return db.prepare(`
+    SELECT DISTINCT tc.table_name AS hija, kcu.column_name AS columna, ccu.table_name AS padre
+      FROM information_schema.table_constraints tc
+      JOIN information_schema.key_column_usage kcu
+        ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+      JOIN information_schema.constraint_column_usage ccu
+        ON tc.constraint_name = ccu.constraint_name AND tc.table_schema = ccu.table_schema
+     WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public'
+  `).all();
+}
+
 async function relacionesFk() {
   const filas = await db.prepare(`
     SELECT DISTINCT tc.table_name AS hija, ccu.table_name AS padre
@@ -201,6 +215,30 @@ router.post('/restaurar', async (req, res) => {
   const relaciones = await relacionesFk();
   const orden = ordenTopologico(tablasARestaurar, relaciones);
 
+  // Posicion de cada tabla en el orden de insercion, para saber cual entra
+  // antes que cual.
+  const posicion = new Map(orden.map((t, i) => [t, i]));
+
+  // Columnas que apuntan a una tabla que se inserta DESPUES (o a si misma).
+  // Son las que cierran un circulo: `almacenes.usuario_id` apunta a usuarios
+  // y `usuarios.almacen_id` apunta a almacenes, asi que una de las dos
+  // siempre llega antes que su referencia y la base rechaza la fila.
+  //
+  // Sin esto, un respaldo REAL —con usuarios y almacenes— no se podia
+  // restaurar: fallaba entero. Se descubrio al limpiar la base del cliente.
+  const fkColumnas = await columnasFk();
+  const aplazadas = new Map(); // tabla -> Set(columnas que se rellenan al final)
+  for (const { hija, columna, padre } of fkColumnas) {
+    if (!posicion.has(hija) || !posicion.has(padre)) continue;
+    if (posicion.get(padre) >= posicion.get(hija)) {
+      if (!aplazadas.has(hija)) aplazadas.set(hija, new Set());
+      aplazadas.get(hija).add(columna);
+    }
+  }
+
+  // Lo que hay que rellenar en la segunda pasada: { tabla, columna, id, valor }
+  const porRellenar = [];
+
   let totalFilas = 0;
 
   // Todo dentro de una transacción: si algo falla a mitad de camino
@@ -230,9 +268,19 @@ router.post('/restaurar', async (req, res) => {
       if (!Array.isArray(filas) || !filas.length) continue;
       const colsValidas = columnas[tabla] || new Set();
 
+      const columnasAplazadas = aplazadas.get(tabla) || new Set();
+
       for (const fila of filas) {
         const cols = Object.keys(fila || {}).filter((c) => colsValidas.has(c));
         if (!cols.length) continue;
+
+        // Las columnas que cierran un circulo entran en blanco y se
+        // rellenan al final, cuando la tabla a la que apuntan ya existe.
+        for (const c of cols) {
+          if (columnasAplazadas.has(c) && fila[c] != null && fila.id != null) {
+            porRellenar.push({ tabla, columna: c, id: fila.id, valor: fila[c] });
+          }
+        }
         const marcadores = cols.map(() => '?').join(', ');
         const nombresCols = cols.map((c) => `"${c}"`).join(', ');
         // El envoltorio de la base añade "RETURNING id" a todo INSERT que no
@@ -248,7 +296,7 @@ router.post('/restaurar', async (req, res) => {
         const retorno = colsValidas.has('id') ? '' : ' RETURNING 1';
         await db.prepare(`
           INSERT INTO "${tabla}" (${nombresCols}) VALUES (${marcadores})${retorno}
-        `).run(...cols.map((c) => fila[c]));
+        `).run(...cols.map((c) => (columnasAplazadas.has(c) ? null : fila[c])));
         totalFilas += 1;
       }
 
@@ -264,6 +312,13 @@ router.post('/restaurar', async (req, res) => {
           )
         `);
       }
+    }
+
+    // Segunda pasada: ahora que TODAS las tablas tienen sus filas, se
+    // rellenan las columnas que se dejaron en blanco por el circulo.
+    for (const r of porRellenar) {
+      await db.prepare(`UPDATE "${r.tabla}" SET "${r.columna}" = ? WHERE id = ?`)
+        .run(r.valor, r.id);
     }
   });
 
