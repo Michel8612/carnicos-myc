@@ -34,6 +34,15 @@ let monedaTecleada = 'CUP';
 // Se guardan aquí para armar el aviso al transportista al enviar mercancía.
 let destinosCache = [];
 
+// Producto que se esta editando (null = se esta creando uno nuevo). El
+// formulario es el MISMO para las dos cosas: duplicarlo habria significado
+// mantener dos juegos de campos que se desincronizan a la primera.
+let productoEditandoId = null;
+
+// En que moneda tecleo el costo del producto. Igual que en la entrada de
+// almacen: la que escribio es la moneda real; la otra es su equivalencia.
+let monedaProductoTecleada = 'CUP';
+
 const TIPO_LABEL = {
   materia_prima: 'Materia prima',
   terminado: 'Terminado',
@@ -52,7 +61,8 @@ productoForm.addEventListener('submit', (e) => {
   const nombre = document.getElementById('nombreProducto').value.trim();
   const tipo = document.getElementById('tipoProducto').value;
   const unidad_id = Number(unidadProductoSelect.value) || null;
-  const precio_costo = parseFloat(document.getElementById('precioCosto').value) || 0;
+  const costoCup = parseFloat(document.getElementById('precioCosto').value);
+  const costoUsd = parseFloat(document.getElementById('precioCostoUsd').value);
   const precioVentaVal = document.getElementById('precioVenta').value;
   const stockMinimoVal = document.getElementById('stockMinimo').value;
   const cantidadInicialVal = document.getElementById('cantidadInicial').value;
@@ -61,10 +71,28 @@ productoForm.addEventListener('submit', (e) => {
     nombre,
     tipo,
     unidad_id,
-    precio_costo,
     precio_venta: precioVentaVal ? parseFloat(precioVentaVal) : 0,
     stock_minimo: stockMinimoVal ? parseFloat(stockMinimoVal) : 0,
   };
+  // El costo va en la moneda que se escribio; el servidor calcula la otra y
+  // archiva la tasa. Se manda `moneda_origen` para que quede constancia de
+  // en cual se compro DE VERDAD, que es lo que hace falta para saber luego
+  // cuanto del inventario se pago en dolares.
+  if (costoCup > 0) datos.precio_costo = costoCup;
+  if (costoUsd > 0) datos.precio_costo_usd = costoUsd;
+  if (costoCup > 0 || costoUsd > 0) datos.moneda_origen = monedaProductoTecleada;
+
+  // ---- Modo EDICION ----
+  if (productoEditandoId) {
+    API.editarProducto(productoEditandoId, datos)
+      .then((r) => {
+        if (r && r.aviso) alert(r.aviso);
+        salirDeEdicion();
+        cargarTodo();
+      })
+      .catch((error) => alert('No se pudo guardar: ' + error.message));
+    return;
+  }
 
   // Cantidad inicial (opcional): si se indica, hay que decir también en
   // qué almacén entra. Si el usuario no puede elegir (un solo almacén
@@ -546,6 +574,7 @@ function cargarExistencias() {
         <td>${tieneCosto ? Number(producto.precio_costo).toFixed(2) : '—'}</td>
         <td class="costo-usd" data-cup="${tieneCosto ? producto.precio_costo : ''}">—</td>
         <td>
+          <button onclick="editarProducto(${producto.id})">Editar</button>
           <button onclick="eliminarProducto(${producto.id})">Eliminar</button>
         </td>
       `;
@@ -564,16 +593,77 @@ function cargarExistencias() {
 }
 
 // Eliminar producto
+// Borrar un producto, u ocultarlo si su historial no lo permite.
+//
+// El servidor responde 409 con la lista de donde esta usado, en vez de
+// intentar el borrado y reventar. Antes al usuario le llegaba el error crudo
+// de la base de datos, que no dice nada; ahora se le explica y elige.
 function eliminarProducto(id) {
   if (!confirm('¿Eliminar este producto?')) return;
 
   API.eliminarProducto(id)
-    .then(() => cargarTodo())
+    .then((r) => {
+      if (r && r.eliminado) alert('Producto eliminado.');
+      cargarTodo();
+    })
     .catch((error) => {
-      console.error('Error al eliminar:', error);
+      const datos = error.data || {};
+      if (datos.se_puede_ocultar) {
+        if (confirm(error.message + '\n\n¿Quiere ocultarlo?')) {
+          API.ocultarProducto(id)
+            .then(() => { alert('Producto oculto. Su historial se conserva.'); cargarTodo(); })
+            .catch((e2) => alert('No se pudo ocultar: ' + e2.message));
+        }
+        return;
+      }
       alert('Error: ' + error.message);
     });
 }
+
+// ---- Editar un producto ya creado ----
+// Rellena el MISMO formulario del alta y lo pone en modo edicion. El costo de
+// compra cambia de un dia para otro, asi que poder corregirlo sin dar de baja
+// el producto era imprescindible: antes no existia forma de hacerlo.
+function editarProducto(id) {
+  API.productos().then((productos) => {
+    const p = (productos.productos || productos).find((x) => Number(x.id) === Number(id));
+    if (!p) { alert('No se encontro ese producto.'); return; }
+
+    productoEditandoId = id;
+    document.getElementById('nombreProducto').value = p.nombre || '';
+    document.getElementById('tipoProducto').value = p.tipo || 'materia_prima';
+    if (p.unidad_id) unidadProductoSelect.value = p.unidad_id;
+    document.getElementById('precioCosto').value = p.precio_costo != null ? p.precio_costo : '';
+    document.getElementById('precioCostoUsd').value = (tasaDelDia && p.precio_costo > 0)
+      ? (p.precio_costo / tasaDelDia).toFixed(2) : '';
+    document.getElementById('precioVenta').value = p.precio_venta != null ? p.precio_venta : '';
+    document.getElementById('stockMinimo').value = p.stock_minimo != null ? p.stock_minimo : '';
+
+    // La cantidad inicial no se toca al editar: para mover existencias esta
+    // "Registrar Entrada / Salida", que deja su rastro en el historial.
+    const cant = document.getElementById('cantidadInicial');
+    cant.value = ''; cant.classList.add('hidden');
+    document.getElementById('altaAlmacen').classList.add('hidden');
+
+    document.getElementById('tituloFormProducto').textContent = 'Editar: ' + p.nombre;
+    document.getElementById('btnGuardarProducto').textContent = 'Guardar cambios';
+    document.getElementById('btnCancelarEdicion').classList.remove('hidden');
+    document.getElementById('formProducto').classList.remove('hidden');
+    document.getElementById('formProducto').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }).catch((e) => alert('No se pudo cargar el producto: ' + e.message));
+}
+
+function salirDeEdicion() {
+  productoEditandoId = null;
+  productoForm.reset();
+  document.getElementById('cantidadInicial').classList.remove('hidden');
+  document.getElementById('tituloFormProducto').textContent = 'Nuevo Producto';
+  document.getElementById('btnGuardarProducto').textContent = 'Guardar Producto';
+  document.getElementById('btnCancelarEdicion').classList.add('hidden');
+  document.getElementById('formProducto').classList.add('hidden');
+}
+
+document.getElementById('btnCancelarEdicion').addEventListener('click', salirDeEdicion);
 
 // Cargar todo de nuevo (tras crear/eliminar/mover)
 function cargarTodo() {
@@ -584,6 +674,7 @@ function cargarTodo() {
   cargarBandejaRecepcion();       // transferencias pendientes por recibir
   cargarHistorialTransferencias(); // historial de lo enviado
   cargarHistorialMovimientos();   // historial de entradas/salidas/ajustes
+  cargarProductosOcultos();
 }
 
 // ============================================================
@@ -878,9 +969,95 @@ function pintarCostosUsd() {
   });
 }
 
+// ============================================================
+//  COSTO DEL PRODUCTO EN DOS MONEDAS (formulario de alta/edicion)
+//
+//  Mismo comportamiento que en la entrada de almacen y por el mismo
+//  motivo: hay compras que se hacen en dolares, y obligar a teclear el
+//  equivalente en pesos hacia que el dueno sacara la cuenta a mano con
+//  una tasa que cambia todos los dias.
+//
+//  Se apoya en `tasaDelDia`, que ya carga prepararCostoEnDosMonedas():
+//  una sola consulta de la tasa para toda la pantalla.
+// ============================================================
+function prepararCostoDelProducto() {
+  const cup = document.getElementById('precioCosto');
+  const usd = document.getElementById('precioCostoUsd');
+  const nota = document.getElementById('notaTasaProducto');
+  if (!cup || !usd || !nota) return;
+
+  const pintarNota = () => {
+    if (tasaDelDia) {
+      nota.textContent = 'Tasa de hoy: 1 USD = ' + tasaDelDia.toLocaleString('es-ES')
+        + ' CUP. Escriba en una casilla y la otra se calcula sola.';
+      nota.className = 'nota-tasa';
+    } else {
+      nota.textContent = 'No hay tasa del dolar ahora mismo: escriba el costo en pesos.';
+      nota.className = 'nota-tasa nota-aviso';
+    }
+  };
+  pintarNota();
+  // La tasa llega por internet; cuando entre, se refresca el aviso.
+  setTimeout(pintarNota, 4000);
+
+  const convertir = (desde, hacia, factor) => {
+    monedaProductoTecleada = desde === cup ? 'CUP' : 'USD';
+    if (!tasaDelDia) return;
+    const v = parseFloat(desde.value);
+    if (!(v > 0)) { if (hacia.dataset.manual !== '1') hacia.value = ''; return; }
+    if (hacia.dataset.manual !== '1') hacia.value = factor(v).toFixed(2);
+  };
+
+  cup.addEventListener('input', () => { cup.dataset.manual = ''; convertir(cup, usd, (v) => v / tasaDelDia); });
+  usd.addEventListener('input', () => { usd.dataset.manual = ''; convertir(usd, cup, (v) => v * tasaDelDia); });
+  cup.addEventListener('change', () => { if (usd.value) cup.dataset.manual = '1'; });
+  usd.addEventListener('change', () => { if (cup.value) usd.dataset.manual = '1'; });
+}
+
+// ============================================================
+//  PRODUCTOS OCULTOS
+//
+//  Un producto usado en recetas o ventas no se puede borrar sin borrar
+//  contabilidad, asi que se oculta. Esta seccion existe para que ocultar
+//  no sea un viaje de ida: sin ella, el producto desapareceria y no
+//  habria forma de traerlo de vuelta sin tocar la base a mano.
+//
+//  Solo se muestra si hay ocultos. Una seccion vacia en una pantalla que
+//  ya esta cargada solo estorba.
+// ============================================================
+function cargarProductosOcultos() {
+  const bloque = document.getElementById('bloqueOcultos');
+  const lista = document.getElementById('listaOcultos');
+  if (!bloque || !lista) return;
+
+  return API.productosOcultos().then((ocultos) => {
+    if (!ocultos.length) { bloque.classList.add('hidden'); return; }
+
+    lista.innerHTML = ocultos.map((p) => `
+      <tr>
+        <td>${p.nombre}</td>
+        <td>${TIPO_LABEL[p.tipo] || p.tipo}</td>
+        <td>${p.unidad || ''}</td>
+        <td><button onclick="mostrarProducto(${p.id})">Volver a mostrar</button></td>
+      </tr>`).join('');
+    bloque.classList.remove('hidden');
+  }).catch(() => {
+    // Si falla, la seccion se queda oculta: no es lo principal de la
+    // pantalla y un error aqui no puede estorbar el trabajo del almacen.
+  });
+}
+
+function mostrarProducto(id) {
+  API.mostrarProducto(id)
+    .then(() => cargarTodo())
+    .catch((e) => alert('No se pudo mostrar: ' + e.message));
+}
+
 // Carga inicial
 cargarUnidades();
 cargarFiltroAlmacenMovimientos();
 cargarTodo();
 prepararCostoEnDosMonedas();
 cargarValorInventario();
+prepararCostoDelProducto();
+cargarProductosOcultos();

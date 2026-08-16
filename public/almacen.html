@@ -41,7 +41,7 @@
 
     <!-- Formulario para nuevo producto -->
     <div id="formProducto" class="hidden">
-      <h2>Nuevo Producto</h2>
+      <h2 id="tituloFormProducto">Nuevo Producto</h2>
       <form id="productoForm">
         <input type="text" id="nombreProducto" placeholder="Nombre del Producto" required>
 
@@ -55,7 +55,23 @@
           <!-- Se llena dinámicamente desde API.unidades() -->
         </select>
 
-        <input type="number" step="0.01" id="precioCosto" placeholder="Precio de Costo" required>
+        <!-- El costo se puede escribir en pesos, en dólares o en los dos.
+             Muchas compras se hacen EN DÓLARES: obligar a teclear el
+             equivalente en pesos hacía que el dueño sacara la cuenta a mano
+             cada vez, con la tasa cambiando a diario. Al escribir en una
+             casilla, la otra se calcula sola con la tasa de elTOQUE. -->
+        <div class="fila-monedas">
+          <label>
+            <span>Precio de costo en CUP</span>
+            <input type="number" step="0.01" min="0" id="precioCosto" placeholder="0.00">
+          </label>
+          <label>
+            <span>…o en USD</span>
+            <input type="number" step="0.01" min="0" id="precioCostoUsd" placeholder="0.00">
+          </label>
+        </div>
+        <p class="nota-tasa" id="notaTasaProducto">Consultando la tasa del dólar…</p>
+
         <input type="number" step="0.01" id="precioVenta" placeholder="Precio de Venta (opcional)">
         <input type="number" step="0.01" id="stockMinimo" placeholder="Stock Mínimo (opcional)">
 
@@ -71,7 +87,8 @@
                usa el selector de movimientos. -->
         </select>
 
-        <button type="submit">Guardar Producto</button>
+        <button type="submit" id="btnGuardarProducto">Guardar Producto</button>
+        <button type="button" id="btnCancelarEdicion" class="hidden">Cancelar</button>
       </form>
     </div>
 
@@ -186,6 +203,25 @@
             </tr>
           </thead>
           <tbody id="tbValorFechas"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Productos ocultos. Se muestra SOLO si hay alguno: si no, sería una
+         sección vacía estorbando en una pantalla que ya tiene mucho.
+         Sin esto, ocultar un producto sería un viaje de ida. -->
+    <div id="bloqueOcultos" class="hidden">
+      <h2>Productos ocultos</h2>
+      <p class="ayuda-ocultos">
+        No aparecen en las listas ni en los desplegables, pero su historial se
+        conserva. Se pueden volver a mostrar cuando haga falta.
+      </p>
+      <div class="tabla-scroll">
+        <table>
+          <thead>
+            <tr><th>Producto</th><th>Tipo</th><th>Unidad</th><th>Acción</th></tr>
+          </thead>
+          <tbody id="listaOcultos"></tbody>
         </table>
       </div>
     </div>

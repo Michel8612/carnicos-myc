@@ -148,6 +148,12 @@ const API = {
   crearProducto: (d) => apiFetch('/inventario/productos', { method: 'POST', body: JSON.stringify(d) }),
   editarProducto: (id, d) => apiFetch('/inventario/productos/' + id, { method: 'PUT', body: JSON.stringify(d) }),
   eliminarProducto: (id) => apiFetch('/inventario/productos/' + id, { method: 'DELETE' }),
+  // Si el producto esta usado en recetas, producciones o ventas, el borrado
+  // responde 409 explicando donde; entonces se puede OCULTAR conservando el
+  // historial. Borrar ese historial seria borrar contabilidad.
+  ocultarProducto: (id) => apiFetch('/inventario/productos/' + id + '?ocultar=1', { method: 'DELETE' }),
+  productosOcultos: () => apiFetch('/inventario/productos/ocultos'),
+  mostrarProducto: (id) => apiFetch('/inventario/productos/' + id + '/mostrar', { method: 'POST' }),
   registrarMovimiento: (d) => apiFetch('/inventario/movimientos', { method: 'POST', body: JSON.stringify(d) }),
   // Valor del inventario y entradas por fecha. Devuelve 403 a quien no sea
   // dueño o contabilidad: el almacenero trabaja con cantidades, no con dinero.

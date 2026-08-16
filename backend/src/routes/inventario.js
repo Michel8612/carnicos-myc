@@ -126,9 +126,24 @@ router.get('/productos', async (req, res) => {
 // exactamente igual que siempre, sin existencia (el flujo de antes no
 // cambia en nada).
 router.post('/productos', async (req, res) => {
-  const { nombre, tipo, categoria, unidad_id, precio_costo, precio_venta, stock_minimo } = req.body;
+  const { nombre, tipo, categoria, unidad_id, precio_venta, stock_minimo } = req.body;
   const { almacen_id } = req.body;
   if (!nombre || !tipo) return res.status(400).json({ error: 'Indique nombre y tipo del producto.' });
+
+  // El costo se puede declarar en pesos, en dólares o en ambos. Muchas
+  // compras se hacen EN DÓLARES y obligar a teclear el equivalente en pesos
+  // hacía que el dueño tuviera que sacar la cuenta a mano cada vez, con la
+  // tasa cambiando a diario. Ahora escribe la moneda en que compró de verdad
+  // y el sistema calcula la otra.
+  const costoAlta = await resolverCosto({
+    costo_cup: req.body.precio_costo,
+    costo_usd: req.body.precio_costo_usd,
+    moneda_origen: req.body.moneda_origen,
+    tasa: req.body.tasa,
+  });
+  // En la ficha del producto el precio de costo vive en pesos: es la moneda
+  // en la que suman el inventario y la contabilidad.
+  const precio_costo = costoAlta.cup ?? 0;
 
   const cantidadInicial = Number(req.body.cantidad) || 0;
   if (cantidadInicial > 0) {
@@ -152,10 +167,21 @@ router.post('/productos', async (req, res) => {
     productoId = r.lastInsertRowid;
 
     if (cantidadInicial > 0) {
+      // Se archiva el costo IGUAL que en una entrada normal. Antes no se
+      // hacía, y el resultado era que dar de alta un producto con cantidad
+      // inicial dejaba una entrada "sin costo": el valor del inventario y
+      // las entradas por fecha salían en cero aunque el producto tuviera su
+      // precio en la ficha. Fue justo lo que reportó el cliente.
       await db.prepare(`
-        INSERT INTO movimientos (producto_id, almacen_id, tipo, cantidad, origen_tipo, usuario_id, nota)
-        VALUES (?, ?, 'entrada', ?, 'manual', ?, ?)
-      `).run(productoId, almacen_id, cantidadInicial, req.usuario.id, 'Alta de producto con cantidad inicial');
+        INSERT INTO movimientos (
+          producto_id, almacen_id, tipo, cantidad, origen_tipo, usuario_id, nota,
+          costo_unitario_cup, costo_unitario_usd, moneda_origen, tasa_usada
+        ) VALUES (?, ?, 'entrada', ?, 'manual', ?, ?, ?, ?, ?, ?)
+      `).run(
+        productoId, almacen_id, cantidadInicial, req.usuario.id,
+        'Alta de producto con cantidad inicial',
+        costoAlta.cup, costoAlta.usd, costoAlta.moneda_origen, costoAlta.tasa,
+      );
       await moverExistencia(productoId, almacen_id, cantidadInicial);
     }
   });
@@ -200,37 +226,155 @@ router.post('/productos', async (req, res) => {
 // Editar un producto existente.
 router.put('/productos/:id', async (req, res) => {
   const id = Number(req.params.id);
-  const { nombre, tipo, categoria, unidad_id, precio_costo, precio_venta, stock_minimo } = req.body;
+  const { nombre, tipo, categoria, unidad_id, precio_venta, stock_minimo } = req.body;
   if (!nombre || !tipo) return res.status(400).json({ error: 'Indique nombre y tipo.' });
+
+  const antes = await db.prepare('SELECT * FROM productos WHERE id = ?').get(id);
+  if (!antes) return res.status(404).json({ error: 'Ese producto no existe.' });
+
+  // Igual que en el alta: se puede escribir el costo en dólares y el peso
+  // sale solo. El costo de compra cambia de un día para otro, así que poder
+  // corregirlo sin dar de baja el producto es imprescindible.
+  const costo = await resolverCosto({
+    costo_cup: req.body.precio_costo,
+    costo_usd: req.body.precio_costo_usd,
+    moneda_origen: req.body.moneda_origen,
+    tasa: req.body.tasa,
+  });
+  // Si no se declara ningún costo, se conserva el que tenía: editar el
+  // nombre no puede dejar el producto a cero sin querer.
+  const precioCosto = costo.cup ?? (Number(antes.precio_costo) || 0);
+
   await db.prepare(`
     UPDATE productos
     SET nombre = ?, tipo = ?, categoria = ?, unidad_id = ?, precio_costo = ?, precio_venta = ?, stock_minimo = ?
     WHERE id = ?
-  `).run(nombre, tipo, categoria || null, unidad_id || null, precio_costo || 0, precio_venta || 0, stock_minimo || 0, id);
-  res.json({ ok: true });
+  `).run(nombre, tipo, categoria || null, unidad_id || null, precioCosto,
+         precio_venta ?? antes.precio_venta ?? 0, stock_minimo ?? antes.stock_minimo ?? 0, id);
+
+  // Cambiar un precio es un hecho económico: mueve el valor del inventario y
+  // el margen. Tiene que quedar quién lo hizo y desde qué cifra.
+  if (Number(antes.precio_costo) !== Number(precioCosto)) {
+    await auditar({
+      modulo: 'almacen', accion: 'modificar', req, entidad: 'productos', entidad_id: id,
+      descripcion: `Precio de costo de ${nombre}: ${antes.precio_costo} → ${precioCosto} CUP`
+                 + (costo.usd ? ` (${costo.usd} USD a ${costo.tasa})` : ''),
+      antes: { precio_costo: antes.precio_costo }, despues: { precio_costo: precioCosto },
+    });
+  }
+
+  res.json({ ok: true, precio_costo: precioCosto, precio_costo_usd: costo.usd, tasa: costo.tasa, aviso: costo.aviso });
 });
 
 // Eliminar un producto. Si ya tiene movimientos, no se borra de
 // verdad (se desactiva) para no romper el historial. Si nunca se
 // usó, se borra del todo.
+// Dónde puede estar enganchado un producto. Antes solo se miraban los
+// movimientos, y al borrar uno que estaba en una RECETA la base lo
+// rechazaba: al usuario le llegaba el error crudo de Postgres, ilegible.
+// Doce tablas apuntan a `productos`; estas son las que el dueño entiende.
+const USOS_DE_PRODUCTO = [
+  { tabla: 'receta_ingredientes', campo: 'producto_id',       etiqueta: 'receta(s)' },
+  { tabla: 'producciones',        campo: 'producto_final_id', etiqueta: 'producción(es)' },
+  { tabla: 'produccion_consumo',  campo: 'producto_id',       etiqueta: 'producción(es) que lo consumieron' },
+  { tabla: 'produccion_disponible', campo: 'producto_id',     etiqueta: 'producción(es) esperando entrada' },
+  { tabla: 'compras_detalle',     campo: 'producto_id',       etiqueta: 'compra(s)' },
+  { tabla: 'transferencias',      campo: 'producto_id',       etiqueta: 'transferencia(s)' },
+  { tabla: 'jornada_ventas',      campo: 'producto_id',       etiqueta: 'jornada(s) de venta' },
+  { tabla: 'conciliacion_lineas', campo: 'producto_id',       etiqueta: 'conteo(s) físico(s)' },
+  { tabla: 'ipv_diario_lineas',   campo: 'producto_id',       etiqueta: 'parte(s) de IPV' },
+  { tabla: 'movimientos',         campo: 'producto_id',       etiqueta: 'movimiento(s) de almacén' },
+];
+
+async function dondeSeUsaElProducto(id) {
+  const usos = [];
+  for (const u of USOS_DE_PRODUCTO) {
+    try {
+      const r = await db.prepare(`SELECT COUNT(*) AS n FROM ${u.tabla} WHERE ${u.campo} = ?`).get(id);
+      if (Number(r.n) > 0) usos.push(`${r.n} ${u.etiqueta}`);
+    } catch {
+      // Una tabla que no exista en esta instalación no puede impedir el
+      // borrado: se ignora y se sigue mirando las demás.
+    }
+  }
+  return usos;
+}
+
+// Borrar un producto, u ocultarlo si su historial no lo permite.
+//
+// El dueño puede pedir el borrado de dos maneras:
+//   · normal            -> si está enganchado en algún sitio, NO se toca y
+//                          se le explica dónde, para que decida.
+//   · ?ocultar=1        -> se acepta esconderlo conservando el historial.
 router.delete('/productos/:id', async (req, res) => {
   const id = Number(req.params.id);
-  const usado = (await db.prepare(
-    'SELECT COUNT(*) AS n FROM movimientos WHERE producto_id = ?'
-  ).get(id)).n;
-  const enExistencias = (await db.prepare(
-    'SELECT COALESCE(SUM(cantidad),0) AS c FROM existencias WHERE producto_id = ?'
-  ).get(id)).c;
+  const producto = await db.prepare('SELECT id, nombre, activo FROM productos WHERE id = ?').get(id);
+  if (!producto) return res.status(404).json({ error: 'Ese producto ya no existe.' });
 
-  if (usado > 0 || enExistencias > 0) {
-    // Tiene historial o existencias: solo desactivar.
+  const usos = await dondeSeUsaElProducto(id);
+  const enExistencias = Number((await db.prepare(
+    'SELECT COALESCE(SUM(cantidad),0) AS c FROM existencias WHERE producto_id = ?'
+  ).get(id)).c) || 0;
+
+  const aceptaOcultar = req.query.ocultar === '1' || req.body?.ocultar === true;
+
+  if (usos.length || enExistencias > 0) {
+    const motivos = [...usos];
+    if (enExistencias > 0) motivos.push(`${enExistencias} en existencia`);
+
+    if (!aceptaOcultar) {
+      // Se DEVUELVE el porqué en vez de decidir por él. Borrar el historial
+      // de un producto sería borrar contabilidad; ocultarlo es otra cosa y
+      // tiene que elegirla una persona.
+      return res.status(409).json({
+        error: `"${producto.nombre}" no se puede borrar porque está usado en: ${motivos.join(', ')}. `
+             + 'Se puede OCULTAR: deja de aparecer en las listas y su historial se conserva.',
+        se_puede_ocultar: true,
+        usos: motivos,
+      });
+    }
+
     await db.prepare('UPDATE productos SET activo = 0 WHERE id = ?').run(id);
-    return res.json({ ok: true, desactivado: true });
+    await auditar({
+      modulo: 'almacen', accion: 'modificar', req, entidad: 'productos', entidad_id: id,
+      descripcion: `Producto "${producto.nombre}" ocultado (usado en: ${motivos.join(', ')})`,
+    });
+    return res.json({ ok: true, ocultado: true, usos: motivos });
   }
-  // Nunca se usó: borrar del todo.
+
+  // No está enganchado en ningún sitio: se borra de verdad.
   await db.prepare('DELETE FROM existencias WHERE producto_id = ?').run(id);
   await db.prepare('DELETE FROM productos WHERE id = ?').run(id);
+  await auditar({
+    modulo: 'almacen', accion: 'eliminar', req, entidad: 'productos', entidad_id: id,
+    descripcion: `Producto "${producto.nombre}" eliminado (no tenía historial)`,
+    antes: producto,
+  });
   res.json({ ok: true, eliminado: true });
+});
+
+// ---------- Productos ocultos: verlos y recuperarlos ----------
+// Sin esto, ocultar sería un viaje de ida: el producto desaparece y no hay
+// forma de traerlo de vuelta sin tocar la base a mano.
+router.get('/productos/ocultos', async (req, res) => {
+  const filas = await db.prepare(`
+    SELECT p.id, p.nombre, p.tipo, u.abreviatura AS unidad
+      FROM productos p LEFT JOIN unidades u ON u.id = p.unidad_id
+     WHERE p.activo = 0 ORDER BY p.nombre
+  `).all();
+  res.json(filas);
+});
+
+router.post('/productos/:id/mostrar', async (req, res) => {
+  const id = Number(req.params.id);
+  const p = await db.prepare('SELECT id, nombre FROM productos WHERE id = ?').get(id);
+  if (!p) return res.status(404).json({ error: 'Ese producto no existe.' });
+  await db.prepare('UPDATE productos SET activo = 1 WHERE id = ?').run(id);
+  await auditar({
+    modulo: 'almacen', accion: 'modificar', req, entidad: 'productos', entidad_id: id,
+    descripcion: `Producto "${p.nombre}" vuelto a mostrar`,
+  });
+  res.json({ ok: true });
 });
 
 // ---------- Existencias con predicción ----------
