@@ -950,6 +950,55 @@ router.put('/destinos/:tipo/:id', async (req, res) => {
   res.json({ ok: true, direccion, telefono });
 });
 
+// ---------- GET /puntos-venta : que hay en cada punto de venta ----------
+//
+// El almacenero surte los puntos de venta, asi que necesita saber que les
+// queda ANTES de mandar mercancia. Hasta ahora el inventario de cada
+// vendedor era suyo y nadie mas lo veia: el almacenero mandaba a ciegas.
+//
+// Es SOLO DE CONSULTA. Mover la mercancia sigue siendo cosa del vendedor
+// en su hoja, o del almacenero por una transferencia normal, que deja su
+// rastro y necesita que el destinatario la acepte. Dejar que el almacenero
+// tocara el inventario ajeno sin rastro seria abrir un agujero.
+//
+// El dinero se filtra como en todas partes: el almacenero ve cantidades,
+// no precios (ver sinDinero).
+router.get('/puntos-venta', async (req, res) => {
+  const rol = req.usuario?.rol;
+  const puedeVer = ES_ADMIN_TOTAL(rol) || rol === 'contabilidad'
+    || ES_ALMACENERO_LIMITADO(rol) || rol === 'almacen_central';
+  if (!puedeVer) {
+    return res.status(403).json({ error: 'No tiene permiso para ver los puntos de venta.' });
+  }
+
+  const filas = await db.prepare(`
+    SELECT u.id AS punto_id, u.nombre AS punto,
+           v.id, v.nombre AS producto, v.unidad,
+           v.cantidad, v.vendido, v.costo_unitario, v.precio_venta
+      FROM venta_inventario v
+      JOIN usuarios u ON u.id = v.usuario_id
+     WHERE u.activo = 1
+     ORDER BY u.nombre, v.nombre
+  `).all();
+
+  // Se agrupa por punto para que la pantalla no tenga que hacerlo.
+  const puntos = new Map();
+  for (const f of filas) {
+    if (!puntos.has(f.punto_id)) {
+      puntos.set(f.punto_id, { id: f.punto_id, nombre: f.punto, productos: [], total_productos: 0 });
+    }
+    const p = puntos.get(f.punto_id);
+    p.productos.push(sinDinero({
+      id: f.id, producto: f.producto, unidad: f.unidad,
+      cantidad: Number(f.cantidad), vendido: Number(f.vendido),
+      costo_unitario: f.costo_unitario, precio_venta: f.precio_venta,
+    }, rol));
+    p.total_productos += 1;
+  }
+
+  res.json([...puntos.values()]);
+});
+
 router.get('/destinos', async (req, res) => {
   // Si quien consulta es un almacenero con almacén propio, no tiene
   // sentido que se ofrezca a sí mismo como destino de su propia salida.

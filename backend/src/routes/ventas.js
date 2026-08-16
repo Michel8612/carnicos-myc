@@ -351,14 +351,32 @@ router.delete('/producto/:id', async (req, res) => {
 router.post('/reiniciar', async (req, res) => {
   const usuarioId = duenoDeLaHoja(req, req.body);
 
-  // Con qué se cobró la jornada. Por defecto efectivo en CUP, que es lo
-  // habitual: así el cierre de siempre sigue funcionando igual aunque la
-  // pantalla no mande nada.
+  // Con qué se cobró la jornada.
+  //
+  // Se admite un DESGLOSE: un día real se cobra en varias formas y monedas a
+  // la vez ("100 000 en efectivo, 50 000 por transferencia y 100 USD"). Antes
+  // solo se podía declarar UNA forma para todo el día, lo que obligaba a
+  // mentir en el balance.
+  //
+  // Si no viene desglose, se sigue admitiendo la forma única de siempre: el
+  // cierre viejo funciona igual sin tocar nada.
   const FORMAS_PAGO = ['efectivo', 'transferencia'];
-  const formaPago = FORMAS_PAGO.includes(req.body?.forma_pago) ? req.body.forma_pago : 'efectivo';
-  const monedaCobro = /^[A-Z]{2,6}$/.test(String(req.body?.moneda || '').toUpperCase())
-    ? String(req.body.moneda).toUpperCase()
-    : 'CUP';
+  const normalizaForma = (f) => (FORMAS_PAGO.includes(f) ? f : 'efectivo');
+  const normalizaMoneda = (m) => (/^[A-Z]{2,6}$/.test(String(m || '').toUpperCase())
+    ? String(m).toUpperCase() : 'CUP');
+
+  const formaPago = normalizaForma(req.body?.forma_pago);
+  const monedaCobro = normalizaMoneda(req.body?.moneda);
+
+  const cobrosDeclarados = Array.isArray(req.body?.cobros)
+    ? req.body.cobros
+        .map((c) => ({
+          forma: normalizaForma(c?.forma),
+          moneda: normalizaMoneda(c?.moneda),
+          monto: Number(c?.monto),
+        }))
+        .filter((c) => Number.isFinite(c.monto) && c.monto > 0)
+    : [];
 
   const filas = await db.prepare(
     'SELECT * FROM venta_inventario WHERE usuario_id = ? AND vendido > 0'
@@ -399,6 +417,25 @@ router.post('/reiniciar', async (req, res) => {
 
   const totalGanancia = Number((totalDinero - totalCosto).toFixed(2));
 
+  // Ventas hechas HOY por el CARRITO. Se cobran en el acto (crean su fila en
+  // `ventas` y ya movieron caja, libro y dinero disponible), asi que NO se
+  // vuelven a registrar aqui: solo se informan.
+  //
+  // Sin esto, quien vendia por catalogo veia su venta "desaparecer" al cerrar
+  // el dia, porque el cierre solo miraba el campo `vendido` de la hoja y el
+  // carrito nunca lo toca. Era justo lo que reportaba el cliente.
+  const carrito = await db.prepare(`
+    SELECT COALESCE(SUM(total), 0) AS total, COUNT(*) AS ventas
+      FROM ventas
+     WHERE usuario_id = ?
+       AND (fecha AT TIME ZONE 'America/Havana')::date = (now() AT TIME ZONE 'America/Havana')::date
+  `).get(usuarioId);
+  const totalCarrito = Number(Number(carrito.total).toFixed(2));
+  const ventasCarrito = Number(carrito.ventas);
+
+  // Lo que de verdad entró hoy en este punto de venta.
+  const totalDia = Number((totalDinero + totalCarrito).toFixed(2));
+
   // Línea-resumen del cierre, para "Cierres anteriores". OJO: ingreso y
   // costo van en CERO a propósito — el ingreso y el costo reales YA
   // quedaron anotados arriba, línea por línea (una por producto
@@ -416,10 +453,13 @@ router.post('/reiniciar', async (req, res) => {
     unidad: null,
     costo: 0,
     ingreso: 0,
-    valor: totalDinero,
+    valor: totalDia,
     area: 'ventas',
     usuario: req.usuario,
-    nota: `Ganancia: ${totalGanancia.toFixed(2)} · Costo: ${totalCosto.toFixed(2)} · ${filas.length} producto(s) con venta.`,
+    nota: `Hoja: ${totalDinero.toFixed(2)}`
+        + (totalCarrito > 0 ? ` · Carrito: ${totalCarrito.toFixed(2)} (${ventasCarrito} venta/s)` : '')
+        + ` · Ganancia: ${totalGanancia.toFixed(2)} · Costo: ${totalCosto.toFixed(2)}`
+        + ` · ${filas.length} producto(s) con venta.`,
   });
 
   // El dinero cobrado entra al balance del negocio (Parte 2), en la
@@ -430,32 +470,62 @@ router.post('/reiniciar', async (req, res) => {
   // Va FUERA de un try/catch que corte: si esto fallara, el cierre ya se
   // hizo y la mercancía ya se descontó. Se registra el fallo y se sigue,
   // igual que hace el libro contable.
-  if (totalDinero > 0) {
+  // Solo entra lo de la HOJA: lo del carrito ya se registró al venderse.
+  // Sumarlo aquí lo contaría dos veces en el dinero disponible.
+  if (totalDinero > 0 || cobrosDeclarados.length) {
     try {
       const nombreVendedor = (await db.prepare('SELECT nombre FROM usuarios WHERE id = ?').get(usuarioId))?.nombre
         || req.usuario.usuario;
-      await db.prepare(`
-        INSERT INTO dinero_movimientos (forma, moneda, monto, concepto, origen_tipo, origen_id, usuario_id, nota)
-        VALUES (?, ?, ?, ?, 'venta', ?, ?, ?)
-      `).run(
-        formaPago, monedaCobro, Number(totalDinero.toFixed(2)),
-        `Ventas del día — ${nombreVendedor}`,
-        usuarioId, req.usuario.id,
-        `${filas.length} producto(s). Ganancia: ${totalGanancia.toFixed(2)}.`,
-      );
+
+      // Si declaró el desglose, se anota línea por línea: cada forma y cada
+      // moneda va a su propia casilla del balance. Si no, todo junto como antes.
+      const lineas = cobrosDeclarados.length
+        ? cobrosDeclarados
+        : [{ forma: formaPago, moneda: monedaCobro, monto: Number(totalDinero.toFixed(2)) }];
+
+      for (const l of lineas) {
+        await db.prepare(`
+          INSERT INTO dinero_movimientos (forma, moneda, monto, concepto, origen_tipo, origen_id, usuario_id, nota)
+          VALUES (?, ?, ?, ?, 'venta', ?, ?, ?)
+        `).run(
+          l.forma, l.moneda, Number(l.monto.toFixed(2)),
+          `Ventas del día — ${nombreVendedor}`,
+          usuarioId, req.usuario.id,
+          `${filas.length} producto(s). Ganancia: ${totalGanancia.toFixed(2)}.`,
+        );
+      }
     } catch (e) {
       console.error('No se pudo llevar el cobro al balance de dinero:', e.message);
     }
   }
 
+  // Se devuelven las tres cifras por separado para que la pantalla pueda
+  // enseñarlas sin sumarlas mal: lo de la hoja, lo del carrito y el total.
+  const soloCup = cobrosDeclarados.filter((c) => c.moneda === 'CUP')
+    .reduce((s, c) => s + c.monto, 0);
+  const descuadre = cobrosDeclarados.length
+    ? Number((soloCup - totalDinero).toFixed(2))
+    : 0;
+
   res.json({
     ok: true,
     total_dinero: Number(totalDinero.toFixed(2)),
+    total_carrito: totalCarrito,
+    ventas_carrito: ventasCarrito,
+    total_dia: totalDia,
     total_costo: Number(totalCosto.toFixed(2)),
     total_ganancia: totalGanancia,
     productos: filas.length,
     forma_pago: formaPago,
     moneda: monedaCobro,
+    cobros: cobrosDeclarados,
+    // Si lo declarado en pesos no cuadra con lo que dice la hoja, se avisa
+    // pero NO se bloquea: puede haber cobrado parte en divisa. Quien cierra
+    // tiene que poder verlo, no que se lo escondan.
+    aviso: descuadre !== 0
+      ? `Lo declarado en CUP (${soloCup.toFixed(2)}) no coincide con lo vendido en la hoja `
+        + `(${totalDinero.toFixed(2)}). Diferencia: ${descuadre.toFixed(2)}.`
+      : null,
   });
 });
 

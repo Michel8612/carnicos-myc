@@ -189,30 +189,106 @@ async function eliminar(id, nombre) {
 // ---- Cierre diario ----
 // (el botón decía "Reiniciar jornada"; el endpoint que llama sigue
 // siendo /reiniciar, ver el comentario en routes/ventas.js).
-document.getElementById('btnReiniciar').addEventListener('click', async () => {
-  if (!confirm('¿Hacer el cierre diario?\n\nSe descuenta lo vendido de la cantidad, queda registrado en Contabilidad y el conteo de vendido vuelve a cero.')) return;
-  try {
-    // Con qué se cobró la jornada. Hace falta para que el dinero entre en
-    // el sitio correcto del balance: no es lo mismo tener 12 500 en la mano
-    // que en la tarjeta, y el dueño necesita poder distinguirlo.
-    const forma = prompt(
-      '¿Cómo se cobró la mayor parte del día?\n\nEscriba 1 para EFECTIVO o 2 para TRANSFERENCIA.',
-      '1',
-    );
-    if (forma === null) return;   // canceló: no se cierra nada
-    const formaPago = String(forma).trim() === '2' ? 'transferencia' : 'efectivo';
-    const monedaTxt = (prompt('¿En qué moneda? (CUP, USD, EUR…)', 'CUP') || 'CUP').trim().toUpperCase();
+// Líneas de cobro que se van escribiendo en la ventana de cierre.
+let lineasCobro = [];
 
+function pintarLineasCobro() {
+  const cont = document.getElementById('lineasCobro');
+  if (!cont) return;
+  cont.innerHTML = lineasCobro.map((l, i) => `
+    <div class="linea-cobro">
+      <select data-i="${i}" data-c="forma">
+        <option value="efectivo" ${l.forma === 'efectivo' ? 'selected' : ''}>Efectivo</option>
+        <option value="transferencia" ${l.forma === 'transferencia' ? 'selected' : ''}>Transferencia</option>
+      </select>
+      <input type="text" data-i="${i}" data-c="moneda" value="${l.moneda}" maxlength="6" style="text-transform:uppercase;">
+      <input type="number" step="0.01" min="0" data-i="${i}" data-c="monto" value="${l.monto || ''}" placeholder="0.00">
+      <button type="button" class="btn-x" data-quitar="${i}">&#10005;</button>
+    </div>`).join('');
+}
+
+function abrirCierre(totalHoja) {
+  // Se propone lo más habitual: todo en efectivo y en pesos. Quien cobró
+  // de otra forma lo cambia; quien no, cierra de un toque.
+  lineasCobro = [{ forma: 'efectivo', moneda: 'CUP', monto: Number(totalHoja.toFixed(2)) }];
+  document.getElementById('cierreResumen').textContent =
+    `Según la hoja del día se vendieron ${money(totalHoja)}.`;
+  document.getElementById('cierreAviso').textContent = '';
+  pintarLineasCobro();
+  document.getElementById('modalCierre').classList.add('abierto');
+}
+
+document.getElementById('btnAgregarCobro')?.addEventListener('click', () => {
+  lineasCobro.push({ forma: 'transferencia', moneda: 'CUP', monto: 0 });
+  pintarLineasCobro();
+});
+
+document.getElementById('lineasCobro')?.addEventListener('input', (ev) => {
+  const el = ev.target;
+  if (el.dataset.i === undefined) return;
+  const l = lineasCobro[Number(el.dataset.i)];
+  if (!l) return;
+  l[el.dataset.c] = el.dataset.c === 'monto' ? parseFloat(el.value) || 0
+    : (el.dataset.c === 'moneda' ? el.value.toUpperCase() : el.value);
+});
+
+document.getElementById('lineasCobro')?.addEventListener('click', (ev) => {
+  const q = ev.target.dataset && ev.target.dataset.quitar;
+  if (q === undefined) return;
+  lineasCobro.splice(Number(q), 1);
+  pintarLineasCobro();
+});
+
+document.getElementById('cierreCancelar')?.addEventListener('click', () => {
+  document.getElementById('modalCierre').classList.remove('abierto');
+});
+
+// ---- Cierre diario ----
+// (el botón decía "Reiniciar jornada"; el endpoint que llama sigue
+// siendo /reiniciar, ver el comentario en routes/ventas.js).
+document.getElementById('btnReiniciar').addEventListener('click', async () => {
+  // Se calcula lo vendido en la hoja para proponerlo ya escrito.
+  let totalHoja = 0;
+  try {
+    const hoja = await API.ventasHoja(verUsuarioId || undefined);
+    const filas = hoja.filas || hoja.productos || hoja || [];
+    totalHoja = filas.reduce((s, f) => s + (Number(f.vendido) || 0) * (Number(f.precio_venta) || 0), 0);
+  } catch (e) { /* si falla, se abre en cero y lo escribe a mano */ }
+  abrirCierre(totalHoja);
+});
+
+document.getElementById('cierreConfirmar')?.addEventListener('click', async () => {
+  const cobros = lineasCobro.filter((l) => Number(l.monto) > 0);
+  if (!cobros.length && !confirm('No escribió ningún cobro. \u00bfCerrar el día igual?')) return;
+
+  try {
     const r = await API.ventasReiniciar({
       ...(verUsuarioId ? { usuario_id: verUsuarioId } : {}),
-      forma_pago: formaPago,
-      moneda: monedaTxt || 'CUP',
+      cobros,
     });
-    alert(`Cierre diario hecho.\n\nVenta: ${money(r.total_dinero)}\nCosto: ${money(r.total_costo)}\nGanancia: ${money(r.total_ganancia)}\n\nCobrado en ${r.moneda} por ${r.forma_pago}.\nYa aparece en Contabilidad y en el dinero disponible.`);
+    document.getElementById('modalCierre').classList.remove('abierto');
+
+    // Se enseñan las tres cifras SEPARADAS: lo de la hoja, lo que se vendió
+    // por el carrito durante el día (que ya estaba cobrado) y el total. Si
+    // se sumaran a ciegas, el carrito se contaría dos veces.
+    const lineas = [
+      'Cierre del día hecho.',
+      '',
+      'Hoja del día:  ' + money(r.total_dinero),
+    ];
+    if (r.total_carrito > 0) {
+      lineas.push('Carrito (' + r.ventas_carrito + ' venta/s): ' + money(r.total_carrito));
+      lineas.push('TOTAL DEL DÍA: ' + money(r.total_dia));
+    }
+    lineas.push('', 'Costo: ' + money(r.total_costo), 'Ganancia: ' + money(r.total_ganancia));
+    if (cobros.length) {
+      lineas.push('', 'Entró como:');
+      cobros.forEach((c) => lineas.push('  ' + c.forma + ' ' + c.moneda + ': ' + money(c.monto)));
+    }
+    if (r.aviso) lineas.push('', 'AVISO: ' + r.aviso);
+    alert(lineas.join('\n'));
+
     await cargar();
-    // Si el vendedor está mirando "Cierres anteriores", que el que
-    // acaba de hacer aparezca de una vez, sin tener que cambiar de
-    // pestaña y volver.
     if (document.getElementById('pHistorial').classList.contains('activo')) await cargarCierres();
   } catch (e) { alert(e.message); }
 });

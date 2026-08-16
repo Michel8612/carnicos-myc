@@ -23,6 +23,10 @@ const UNIDADES = [
   ['Mililitro', 'ml'],
   ['Gramo', 'g'],
   ['Galón', 'gal'],
+  // Distancia: la vicora de los embutidos y las etiquetas se compran por metro.
+  ['Metro', 'm'],
+  ['Centímetro', 'cm'],
+  ['Rollo', 'rollo'],
 ];
 
 export async function sembrarSiVacio() {

@@ -957,6 +957,28 @@ ALTER TABLE almacenes ADD COLUMN IF NOT EXISTS direccion TEXT;
 ALTER TABLE almacenes ADD COLUMN IF NOT EXISTS telefono  TEXT;
 ALTER TABLE usuarios  ADD COLUMN IF NOT EXISTS direccion TEXT;
 ALTER TABLE usuarios  ADD COLUMN IF NOT EXISTS telefono  TEXT;
+
+-- ============================================================
+--  UNIDADES QUE FALTABAN
+-- ============================================================
+-- Las unidades solo se siembran cuando la base esta vacia, asi que anadirlas
+-- a la semilla no servia de nada para una instalacion en marcha. Esto corre
+-- en cada arranque y solo mete las que no estan.
+--
+-- Las de DISTANCIA hacen falta de verdad: la vicora (tripa) de los embutidos
+-- y las etiquetas se compran por metros, y sin unidad no se podian anadir a
+-- las fichas tecnicas de formulacion.
+INSERT INTO unidades (nombre, abreviatura)
+SELECT v.nombre, v.abrev
+  FROM (VALUES
+        ('Metro', 'm'),
+        ('Centímetro', 'cm'),
+        ('Rollo', 'rollo'),
+        ('Mililitro', 'ml'),
+        ('Litro', 'L'),
+        ('Gramo', 'g')
+       ) AS v(nombre, abrev)
+ WHERE NOT EXISTS (SELECT 1 FROM unidades u WHERE u.abreviatura = v.abrev);
 `;
 
 export default SCHEMA_SQL;

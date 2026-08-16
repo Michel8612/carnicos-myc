@@ -43,6 +43,11 @@ let productoEditandoId = null;
 // almacen: la que escribio es la moneda real; la otra es su equivalencia.
 let monedaProductoTecleada = 'CUP';
 
+// Números fijos a los que avisar por WhatsApp. Se cargan una vez y sirven
+// para que el botón de aviso abra la conversación YA elegida, en vez de
+// obligar a buscar el contacto en cada envío.
+let numerosWhatsapp = [];
+
 const TIPO_LABEL = {
   materia_prima: 'Materia prima',
   terminado: 'Terminado',
@@ -573,6 +578,8 @@ function cargarExistencias() {
         <td>${producto.cantidad}</td>
         <td>${tieneCosto ? Number(producto.precio_costo).toFixed(2) : '—'}</td>
         <td class="costo-usd" data-cup="${tieneCosto ? producto.precio_costo : ''}">—</td>
+        <td class="total-cup">${tieneCosto ? (Number(producto.precio_costo) * Number(producto.cantidad || 0)).toFixed(2) : '—'}</td>
+        <td class="costo-usd total-usd" data-cup="${tieneCosto ? Number(producto.precio_costo) * Number(producto.cantidad || 0) : ''}">—</td>
         <td>
           <button onclick="editarProducto(${producto.id})">Editar</button>
           <button onclick="eliminarProducto(${producto.id})">Eliminar</button>
@@ -587,6 +594,7 @@ function cargarExistencias() {
     });
 
     pintarCostosUsd();
+    pintarAvisoStock(productos || []);
   }).catch((error) => {
     console.error('Error al cargar existencias:', error);
   });
@@ -900,12 +908,29 @@ function mostrarAviso(texto) {
   previa.className = 'at-mensaje';
   previa.textContent = texto;
 
-  const enlace = document.createElement('a');
-  enlace.className = 'at-boton';
-  enlace.href = 'https://wa.me/?text=' + encodeURIComponent(texto);
-  enlace.target = '_blank';
-  enlace.rel = 'noopener';
-  enlace.textContent = 'Enviar por WhatsApp';
+  // Un botón por cada número guardado: abre la conversación con esa
+  // persona y el mensaje ya escrito. Si no hay ninguno configurado, se
+  // deja el botón genérico de siempre, que abre WhatsApp para elegir.
+  const destinatarios = numerosWhatsapp.filter((n) => n.envios !== false);
+  const enlaces = destinatarios.length
+    ? destinatarios.map((n) => {
+        const a = document.createElement('a');
+        a.className = 'at-boton';
+        a.href = 'https://wa.me/' + n.numero + '?text=' + encodeURIComponent(texto);
+        a.target = '_blank';
+        a.rel = 'noopener';
+        a.textContent = 'Enviar a ' + n.nombre;
+        return a;
+      })
+    : [(() => {
+        const a = document.createElement('a');
+        a.className = 'at-boton';
+        a.href = 'https://wa.me/?text=' + encodeURIComponent(texto);
+        a.target = '_blank';
+        a.rel = 'noopener';
+        a.textContent = 'Enviar por WhatsApp';
+        return a;
+      })()];
 
   const copiar = document.createElement('button');
   copiar.type = 'button';
@@ -931,7 +956,7 @@ function mostrarAviso(texto) {
 
   const acciones = document.createElement('div');
   acciones.className = 'at-acciones';
-  acciones.append(enlace, copiar);
+  acciones.append(...enlaces, copiar);
 
   caja.append(cerrar, titulo, previa, acciones);
   movimientoForm.parentNode.insertBefore(caja, movimientoForm.nextSibling);
@@ -1053,11 +1078,71 @@ function mostrarProducto(id) {
     .catch((e) => alert('No se pudo mostrar: ' + e.message));
 }
 
+// ============================================================
+//  AVISO DE STOCK BAJO POR WHATSAPP
+//
+//  Kevin pidió que le avise cuando un producto baje del mínimo. La
+//  campanita del sistema ya lo registra, pero NO suena en el teléfono:
+//  para eso harían falta notificaciones push, que necesitan permiso del
+//  navegador y un servicio aparte encendido.
+//
+//  Esto es la vía barata y que funciona hoy: un botón que arma la lista
+//  de lo que está bajo mínimo y la manda por WhatsApp a los números
+//  marcados para "stock". Se ve al entrar al almacén, así que basta con
+//  mirar la pantalla una vez al día.
+// ============================================================
+function pintarAvisoStock(productos) {
+  const caja = document.getElementById('avisoStockBajo');
+  if (!caja) return;
+
+  // Solo cuenta si el mínimo está configurado: con mínimo en cero, TODO
+  // producto agotado saldría en la lista y el aviso se volvería ruido.
+  const bajos = (productos || []).filter(
+    (p) => Number(p.stock_minimo) > 0 && Number(p.cantidad) <= Number(p.stock_minimo),
+  );
+
+  if (!bajos.length) { caja.classList.add('hidden'); return; }
+
+  const lista = bajos.map((p) => `${p.nombre}: ${p.cantidad} ${p.unidad || ''} (mínimo ${p.stock_minimo})`);
+  const texto = ['*PRODUCTOS BAJO EL MÍNIMO*', ''].concat(lista)
+    .concat(['', 'Fecha: ' + new Date().toLocaleString('es-CU')])
+    .join(String.fromCharCode(10));
+
+  const destinos = numerosWhatsapp.filter((n) => n.stock === true);
+  const botones = (destinos.length ? destinos : [null]).map((n) => {
+    const a = document.createElement('a');
+    a.className = 'at-boton';
+    a.href = 'https://wa.me/' + (n ? n.numero : '') + '?text=' + encodeURIComponent(texto);
+    a.target = '_blank'; a.rel = 'noopener';
+    a.textContent = n ? ('Avisar a ' + n.nombre) : 'Avisar por WhatsApp';
+    return a;
+  });
+
+  caja.innerHTML = '';
+  const titulo = document.createElement('p');
+  titulo.className = 'at-titulo';
+  titulo.textContent = bajos.length + ' producto(s) bajo el mínimo:';
+  const ul = document.createElement('ul');
+  ul.className = 'lista-bajos';
+  lista.forEach((l) => { const li = document.createElement('li'); li.textContent = l; ul.appendChild(li); });
+  const acc = document.createElement('div');
+  acc.className = 'at-acciones';
+  acc.append(...botones);
+  caja.append(titulo, ul, acc);
+  caja.classList.remove('hidden');
+}
+
 // Carga inicial
 cargarUnidades();
 cargarFiltroAlmacenMovimientos();
 cargarTodo();
 prepararCostoEnDosMonedas();
 cargarValorInventario();
+// Los números de aviso se cargan una vez. Si falla, no pasa nada: el botón
+// genérico de WhatsApp sigue funcionando.
+API.whatsappNumeros()
+  .then((r) => { numerosWhatsapp = (r && r.numeros) || []; })
+  .catch(() => { numerosWhatsapp = []; });
+
 prepararCostoDelProducto();
 cargarProductosOcultos();

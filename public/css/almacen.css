@@ -608,3 +608,15 @@ h1, h2 {
    solo la puerta de vuelta para algo que se escondió. */
 #bloqueOcultos { opacity: .92; }
 .ayuda-ocultos { font-size: 12.5px; color: #78909c; margin: 4px 0 8px; line-height: 1.4; }
+
+/* Total por producto: cantidad x costo. Se distingue del costo unitario
+   para que no se confundan de un vistazo. */
+#almacenList .total-cup { font-weight: bold; color: #1565C0; white-space: nowrap; }
+#almacenList .total-usd { font-weight: bold; }
+
+/* Aviso de stock bajo: ámbar, no verde, para que no se confunda con el
+   aviso de envío (que es una buena noticia; este es un pendiente). */
+.aviso-stock { background: #fff8e1; border-color: #ffca28; }
+.aviso-stock .at-titulo { color: #7a5c00; }
+.lista-bajos { margin: 6px 0 10px; padding-left: 20px; font-size: 13px; color: #5d4400; }
+.lista-bajos li { margin-bottom: 3px; }

@@ -78,6 +78,68 @@ function validar({ correo, nit }) {
 
 // GET: libre para cualquier sesión (lo necesita también la
 // pantalla de facturación aunque el usuario no sea el dueño).
+
+// ============================================================
+//  NÚMEROS FIJOS PARA EL AVISO POR WHATSAPP
+//
+//  A quién se le avisa cuando sale mercancía hacia un punto de venta, y
+//  cuando un producto baja del mínimo. Son números de trabajo, no
+//  secretos: por eso viven aquí y NO en «credenciales», donde el valor se
+//  oculta y no se podría releer ni corregir.
+//
+//  IMPORTANTE — esto NO envía nada solo. El sistema corre en Netlify y no
+//  puede hablar con WhatsApp por su cuenta; para eso haría falta la API
+//  oficial de Meta (con verificación de negocio y plantillas aprobadas) o
+//  un servicio propio encendido las 24 horas. Lo que se guarda aquí sirve
+//  para que el botón de aviso abra WhatsApp CON EL DESTINATARIO YA PUESTO:
+//  un toque en vez de buscar el contacto cada vez.
+// ============================================================
+const CLAVE_WHATSAPP = 'whatsapp.numeros';
+
+// Deja el número como lo quiere wa.me: solo dígitos, sin +, espacios ni
+// guiones. Se admite escribirlo como sea; se normaliza al guardar.
+function normalizarNumero(v) {
+  const solo = String(v || '').replace(/[^0-9]/g, '');
+  return solo.length >= 8 ? solo : null;
+}
+
+router.get('/whatsapp', async (req, res) => {
+  const fila = await db.prepare('SELECT valor FROM parametros WHERE clave = ?').get(CLAVE_WHATSAPP);
+  let numeros = [];
+  try { numeros = fila && fila.valor ? JSON.parse(fila.valor) : []; } catch { numeros = []; }
+  res.json({ numeros });
+});
+
+router.put('/whatsapp', async (req, res) => {
+  const entrada = Array.isArray(req.body?.numeros) ? req.body.numeros : [];
+  const numeros = entrada
+    .map((n) => ({
+      nombre: String(n?.nombre || '').trim().slice(0, 60) || 'Sin nombre',
+      numero: normalizarNumero(n?.numero),
+      // Para qué se le avisa: envíos de mercancía, stock bajo, o las dos.
+      envios: n?.envios !== false,
+      stock: n?.stock === true,
+    }))
+    .filter((n) => n.numero);
+
+  // La tabla `parametros` NO tiene columna `id`, y el envoltorio de la base
+  // añade "RETURNING id" a todo INSERT que no traiga uno: sin este RETURNING
+  // explícito fallaría con «column "id" does not exist».
+  await db.prepare(`
+    INSERT INTO parametros (clave, valor, actualizado_en)
+    VALUES (?, ?, NOW())
+    ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor, actualizado_en = NOW()
+    RETURNING clave
+  `).run(CLAVE_WHATSAPP, JSON.stringify(numeros));
+
+  await auditar({
+    modulo: 'config', accion: 'modificar', req, entidad: 'parametros',
+    descripcion: `Números de WhatsApp para avisos: ${numeros.length} guardado(s)`,
+  });
+
+  res.json({ ok: true, numeros });
+});
+
 router.get('/', async (req, res) => {
   await asegurarFila();
   const fila = await db.prepare('SELECT * FROM empresa_fiscal WHERE id = 1').get();

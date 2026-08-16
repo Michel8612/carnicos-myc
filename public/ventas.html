@@ -41,7 +41,7 @@
     .vacio-vta { text-align:center; color:#777; margin:20px; }
     .ayuda { text-align:center; font-size:12.5px; color:#777; margin:8px 0 0; }
     /* Popup */
-    .modal-fondo { position:fixed; inset:0; background:rgba(0,0,0,.45); display:none; align-items:center; justify-content:center; padding:16px; z-index:50; }
+    .modal-fondo { position:fixed; inset:0; background:rgba(0,0,0,.45); display:none; align-items:center; justify-content:center; padding:16px; z-index:1000; }
     .modal-fondo.abierto { display:flex; }
     .modal-caja { background:#fff; border-radius:14px; padding:22px; width:100%; max-width:440px; box-shadow:0 10px 30px rgba(0,0,0,.3); text-align:left; max-height:92vh; overflow:auto; }
     .modal-caja h2 { color:#1976D2; margin:0 0 14px; }
@@ -195,6 +195,37 @@
       </div>
     </section>
   </main>
+
+  <!-- Cierre del día: desglose de cómo se cobró.
+       Antes se preguntaba con dos ventanas emergentes y solo admitía UNA
+       forma para todo el día, lo que obligaba a mentir en el balance
+       cuando se cobraba parte en efectivo y parte por transferencia. -->
+  <div class="modal-fondo" id="modalCierre">
+    <div class="modal-caja">
+      <h2>Cierre del día</h2>
+      <p id="cierreResumen" style="font-size:13.5px;color:#555;margin:0 0 12px;"></p>
+
+      <p style="font-size:13px;color:#555;margin:0 0 8px;">
+        Escriba cómo entró el dinero. Puede añadir varias líneas: efectivo,
+        transferencia y las monedas que haga falta.
+      </p>
+
+      <div id="lineasCobro"></div>
+
+      <button type="button" id="btnAgregarCobro"
+              style="margin-top:8px;background:#607d8b;color:#fff;border:none;border-radius:8px;padding:9px 14px;cursor:pointer;">
+        + Añadir forma de cobro
+      </button>
+
+      <p id="cierreAviso" style="font-size:12.5px;margin:10px 0 0;min-height:16px;"></p>
+
+      <div class="modal-acc">
+        <button type="button" id="cierreCancelar" style="background:#eceff1;">Cancelar</button>
+        <button type="button" id="cierreConfirmar" style="background:#2e7d32;color:#fff;">Cerrar el día</button>
+      </div>
+    </div>
+  </div>
+
 
   <!-- Popup: agregar producto -->
   <div class="modal-fondo" id="modalProd">

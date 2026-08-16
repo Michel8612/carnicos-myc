@@ -280,6 +280,33 @@
       <p class="sub">Estado de las integraciones automáticas. Mientras no estén activas, los movimientos se registran a mano en la pestaña anterior.</p>
       <div class="tarjetas-pasarela" id="tarjetasPasarela"></div>
     </section>
+
+    <!-- Números para los avisos por WhatsApp -->
+    <div class="tarjeta" id="bloqueWhatsapp">
+      <h2>Avisos por WhatsApp</h2>
+      <p class="sub">
+        A quién se le avisa cuando sale mercancía hacia un punto de venta y
+        cuando un producto baja del mínimo. Al pulsar el botón de aviso se abre
+        WhatsApp <b>con la conversación ya elegida</b>, sin buscar el contacto.
+      </p>
+      <p class="sub" style="background:#fff8e1;border:1px solid #ffca28;color:#7a5c00;border-radius:8px;padding:8px 12px;">
+        El sistema <b>no envía solo</b>: siempre hay que pulsar. Enviar sin que
+        nadie toque nada necesita la API oficial de Meta o un servicio propio
+        encendido las 24 horas, que es un servicio aparte.
+      </p>
+      <div class="tabla-scroll">
+        <table class="datos">
+          <thead>
+            <tr><th class="izq">Nombre</th><th>Número (con código de país)</th><th>Envíos</th><th>Stock bajo</th><th></th></tr>
+          </thead>
+          <tbody id="tbWhatsapp"></tbody>
+        </table>
+      </div>
+      <div class="acciones-wa">
+        <button type="button" id="btnAgregarNumero">+ Añadir número</button>
+        <button type="button" id="btnGuardarNumeros">Guardar números</button>
+      </div>
+    </div>
   </main>
 
   <script src="js/api.js"></script>

@@ -389,3 +389,61 @@ async function cargarPasarelas() {
 // ---------- Arranque ----------
 cargarFiscal();
 cargarCuentas();
+
+// ============================================================
+//  NÚMEROS PARA LOS AVISOS POR WHATSAPP
+//
+//  Se editan en una tabla porque son pocos y cambian: el transportista de
+//  hoy no es el de la semana que viene. El número se guarda solo con
+//  dígitos (así lo quiere wa.me); se puede escribir como sea.
+// ============================================================
+let numerosWa = [];
+
+function pintarNumeros() {
+  const tb = document.getElementById('tbWhatsapp');
+  if (!tb) return;
+  tb.innerHTML = numerosWa.length
+    ? numerosWa.map((n, i) => `<tr>
+        <td class="izq"><input type="text" data-i="${i}" data-c="nombre" value="${(n.nombre || '').replace(/"/g, '&quot;')}" placeholder="Ej. Transportista"></td>
+        <td><input type="text" data-i="${i}" data-c="numero" value="${n.numero || ''}" placeholder="5355512345"></td>
+        <td><input type="checkbox" data-i="${i}" data-c="envios" ${n.envios !== false ? 'checked' : ''}></td>
+        <td><input type="checkbox" data-i="${i}" data-c="stock" ${n.stock ? 'checked' : ''}></td>
+        <td><button type="button" class="btn-x" data-quitar="${i}">✕</button></td>
+      </tr>`).join('')
+    : '<tr><td colspan="5" class="vacio">Sin números. Añada al menos uno para avisar al transportista.</td></tr>';
+}
+
+document.getElementById('btnAgregarNumero')?.addEventListener('click', () => {
+  numerosWa.push({ nombre: '', numero: '', envios: true, stock: false });
+  pintarNumeros();
+});
+
+document.getElementById('tbWhatsapp')?.addEventListener('input', (ev) => {
+  const el = ev.target;
+  if (el.dataset.i === undefined) return;
+  const n = numerosWa[Number(el.dataset.i)];
+  if (!n) return;
+  n[el.dataset.c] = el.type === 'checkbox' ? el.checked : el.value;
+});
+
+document.getElementById('tbWhatsapp')?.addEventListener('click', (ev) => {
+  const q = ev.target.dataset && ev.target.dataset.quitar;
+  if (q === undefined) return;
+  numerosWa.splice(Number(q), 1);
+  pintarNumeros();
+});
+
+document.getElementById('btnGuardarNumeros')?.addEventListener('click', async () => {
+  try {
+    const r = await API.guardarWhatsappNumeros(numerosWa);
+    numerosWa = r.numeros || [];
+    pintarNumeros();
+    // El servidor descarta los que no tengan un número válido: si se
+    // guardaron menos de los que había, hay que decirlo, no callarlo.
+    alert('Guardado. Números activos: ' + numerosWa.length + '.');
+  } catch (e) { alert('No se pudo guardar: ' + e.message); }
+});
+
+API.whatsappNumeros()
+  .then((r) => { numerosWa = (r && r.numeros) || []; pintarNumeros(); })
+  .catch(() => pintarNumeros());

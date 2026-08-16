@@ -140,3 +140,10 @@ body {
   object-fit: contain;
   box-shadow: 0 2px 8px rgba(0, 0, 0, .3);
 }
+
+/* Botones de la tabla de números de WhatsApp */
+.acciones-wa { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.acciones-wa button { padding: 10px 16px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; }
+#btnAgregarNumero { background: #607d8b; color: #fff; }
+#btnGuardarNumeros { background: #2e7d32; color: #fff; }
+#tbWhatsapp input[type="text"] { width: 100%; padding: 7px; border: 1px solid #cfd8dc; border-radius: 6px; box-sizing: border-box; }

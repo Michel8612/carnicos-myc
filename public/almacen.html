@@ -26,6 +26,9 @@
       <span id="contadorAlmacenes">0 almacenes</span>
     </div>
 
+    <!-- Productos bajo el mínimo, con botón para avisar por WhatsApp -->
+    <div id="avisoStockBajo" class="aviso-transporte aviso-stock hidden"></div>
+
     <!-- Aviso de entradas por recibir (transferencias pendientes) -->
     <div id="avisoPendientes" class="aviso-pendientes hidden"></div>
 
@@ -237,8 +240,10 @@
             <th>Tipo</th>
             <th>Unidad</th>
             <th>Cantidad</th>
-            <th>Costo</th>
-            <th title="El mismo costo en dólares, a la tasa de elTOQUE de hoy">Costo USD</th>
+            <th title="Lo que cuesta UNA unidad">Costo unit.</th>
+            <th title="El mismo costo unitario en dólares, a la tasa de hoy">Costo USD</th>
+            <th title="Cantidad x costo unitario">Total CUP</th>
+            <th title="El mismo total en dólares">Total USD</th>
             <th>Acción</th>
           </tr>
         </thead>

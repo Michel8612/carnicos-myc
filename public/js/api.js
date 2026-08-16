@@ -158,6 +158,9 @@ const API = {
   // Valor del inventario y entradas por fecha. Devuelve 403 a quien no sea
   // dueño o contabilidad: el almacenero trabaja con cantidades, no con dinero.
   valorInventario: (p) => apiFetch('/inventario/valor?' + new URLSearchParams(p || {}).toString()),
+  // Qué hay en cada punto de venta. El almacenero lo ve para saber qué
+  // surtir, pero solo de consulta: mover sigue siendo por transferencia.
+  puntosDeVenta: () => apiFetch('/inventario/puntos-venta'),
 
   // --- Recetas ---
   recetas: () => apiFetch('/recetas'),
@@ -288,6 +291,10 @@ const API = {
   // --- Configuración fiscal de la empresa ---
   empresa: () => apiFetch('/empresa'),
   guardarEmpresa: (d) => apiFetch('/empresa', { method: 'PUT', body: JSON.stringify(d) }),
+  // Números fijos a los que avisar por WhatsApp (envíos y stock bajo).
+  whatsappNumeros: () => apiFetch('/empresa/whatsapp'),
+  guardarWhatsappNumeros: (numeros) =>
+    apiFetch('/empresa/whatsapp', { method: 'PUT', body: JSON.stringify({ numeros }) }),
 
   // --- Cuentas bancarias y conciliación ---
   cuentasBancarias: () => apiFetch('/bancos/cuentas'),

@@ -19,6 +19,48 @@ import { servirDescarga } from '../servicios/exportar.js';
 
 const router = Router();
 
+// ------------------------------------------------------------
+//  LOS COBROS Y PAGOS MUEVEN EL DINERO DISPONIBLE
+//
+//  Cobrar una factura ENTRA dinero; pagarle a un proveedor SALE. Hasta
+//  ahora esta pantalla no tocaba el balance: las ventas y los gastos si
+//  lo movian, pero los cobros y pagos se quedaron fuera, asi que el
+//  dueno cobraba y su efectivo no subia. Lo reporto el cliente.
+//
+//  Va en su propio try/catch y NUNCA tumba la operacion: si fallara,
+//  el pago ya quedo registrado en la cuenta y perderlo seria peor que
+//  no reflejarlo en el balance. Se anota el fallo y se sigue, igual que
+//  hace el libro de contabilidad.
+//
+//  `signo` es +1 al cobrar (cuentas por cobrar) y -1 al pagar (por pagar).
+// ------------------------------------------------------------
+const FORMAS_PAGO = ['efectivo', 'transferencia'];
+
+async function moverDineroDisponible({ req, cuenta, pago, signo, deshacer = false }) {
+  try {
+    const forma = FORMAS_PAGO.includes(pago.metodo) ? pago.metodo : 'efectivo';
+    const moneda = /^[A-Z]{2,6}$/.test(String(cuenta.moneda || '').toUpperCase())
+      ? String(cuenta.moneda).toUpperCase() : 'CUP';
+    const monto = Number((Number(pago.monto) * signo * (deshacer ? -1 : 1)).toFixed(2));
+    if (!monto) return;
+
+    const que = cuenta.tipo === 'cobrar' ? 'Cobro' : 'Pago';
+    const quien = cuenta.tercero || 'sin nombre';
+    await db.prepare(`
+      INSERT INTO dinero_movimientos (forma, moneda, monto, concepto, origen_tipo, origen_id, usuario_id, nota)
+      VALUES (?, ?, ?, ?, 'cuenta', ?, ?, ?)
+    `).run(
+      forma, moneda, monto,
+      `${deshacer ? 'Anulado — ' : ''}${que} de ${quien}`,
+      cuenta.id, req.usuario?.id ?? null,
+      cuenta.documento ? `Documento ${cuenta.documento}` : null,
+    );
+  } catch (e) {
+    console.error('No se pudo llevar el cobro/pago al dinero disponible:', e.message);
+  }
+}
+
+
 const TIPOS = ['cobrar', 'pagar'];
 
 function limpiar(v) {
@@ -399,6 +441,13 @@ router.post('/:id/pagos', async (req, res) => {
     });
   }
 
+  // Cobrar SUMA al dinero disponible; pagar RESTA. En la moneda del
+  // documento y en la forma con que se pagó.
+  await moverDineroDisponible({
+    req, cuenta, pago,
+    signo: cuenta.tipo === 'cobrar' ? 1 : -1,
+  });
+
   res.json({ pago, cuenta: cuentaDespues });
 });
 
@@ -439,6 +488,14 @@ router.delete('/pagos/:id', async (req, res) => {
   });
 
   const cuentaDespues = await db.prepare('SELECT * FROM cuentas_terceros WHERE id = ?').get(cuenta.id);
+  // Anular un pago tiene que devolver el dinero a donde estaba: si no, el
+  // balance se quedaria con un cobro que ya no existe.
+  await moverDineroDisponible({
+    req, cuenta, pago,
+    signo: cuenta.tipo === 'cobrar' ? 1 : -1,
+    deshacer: true,
+  });
+
   res.json({ borrado: true, cuenta: cuentaDespues });
 });
 
