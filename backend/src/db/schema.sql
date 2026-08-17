@@ -975,3 +975,49 @@ SELECT v.nombre, v.abrev
         ('Gramo', 'g')
        ) AS v(nombre, abrev)
  WHERE NOT EXISTS (SELECT 1 FROM unidades u WHERE u.abreviatura = v.abrev);
+
+-- ============================================================
+--  VENTAS MAYORISTAS (desde el almacén)
+-- ============================================================
+-- Vender directo del almacén, sin pasar por la hoja de un vendedor. Es
+-- otra cosa que el punto de venta: aquí se le vende a un tercero que
+-- compra en grande, se le pone precio en el momento y sale del almacén.
+--
+-- Funciona como un IPV: se arma la lista con precio y cantidad, se ve el
+-- total de cada línea y el total general, y al vender se descuenta.
+--
+-- El historial NO se borra solo: se conserva hasta que el dueño decida
+-- limpiarlo, igual que el libro de contabilidad.
+CREATE TABLE IF NOT EXISTS ventas_mayoristas (
+  id             SERIAL PRIMARY KEY,
+  almacen_id     INTEGER REFERENCES almacenes(id),
+  almacen_nombre TEXT,                       -- copia, para que el historial se lea aunque el almacén cambie
+  cliente        TEXT,
+  total          DOUBLE PRECISION NOT NULL DEFAULT 0,
+  costo_total    DOUBLE PRECISION NOT NULL DEFAULT 0,
+  ganancia       DOUBLE PRECISION NOT NULL DEFAULT 0,
+  moneda         TEXT NOT NULL DEFAULT 'CUP',
+  forma_pago     TEXT NOT NULL DEFAULT 'efectivo',   -- efectivo | transferencia
+  nota           TEXT,
+  usuario_id     INTEGER REFERENCES usuarios(id),
+  usuario_nombre TEXT,                       -- se guarda por si el usuario se borra
+  fecha          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- El nombre y la unidad del producto se COPIAN a la línea a propósito: si
+-- mañana el producto se borra o se le cambia el nombre, la venta de hoy
+-- tiene que seguir leyéndose tal como se hizo.
+CREATE TABLE IF NOT EXISTS ventas_mayoristas_lineas (
+  id              SERIAL PRIMARY KEY,
+  venta_id        INTEGER NOT NULL REFERENCES ventas_mayoristas(id) ON DELETE CASCADE,
+  producto_id     INTEGER REFERENCES productos(id),
+  producto_nombre TEXT NOT NULL,
+  unidad          TEXT,
+  cantidad        DOUBLE PRECISION NOT NULL,
+  precio_unitario DOUBLE PRECISION NOT NULL,
+  costo_unitario  DOUBLE PRECISION NOT NULL DEFAULT 0,
+  subtotal        DOUBLE PRECISION NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_mayoristas_fecha ON ventas_mayoristas (fecha DESC);
+CREATE INDEX IF NOT EXISTS idx_mayoristas_lineas ON ventas_mayoristas_lineas (venta_id);

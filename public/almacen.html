@@ -40,7 +40,14 @@
     </div>
 
     <!-- Botón para agregar producto -->
-    <button id="btnAgregarProducto">Agregar Producto</button>
+    <div class="acciones-almacen">
+      <button id="btnAgregarProducto">Agregar Producto</button>
+      <!-- Ventas mayoristas: solo lo ve el dueño y contabilidad. El
+           almacenero no pone precios ni cobra (ver Parte 6), así que el
+           botón se le oculta desde js/almacen.js. El servidor lo rechaza
+           igual con un 403: esto es comodidad, no la protección. -->
+      <a href="mayoristas.html" id="btnMayoristas" class="btn-mayoristas hidden">🧾 Ventas mayoristas</a>
+    </div>
 
     <!-- Formulario para nuevo producto -->
     <div id="formProducto" class="hidden">

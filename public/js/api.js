@@ -162,6 +162,14 @@ const API = {
   // surtir, pero solo de consulta: mover sigue siendo por transferencia.
   puntosDeVenta: () => apiFetch('/inventario/puntos-venta'),
 
+  // --- Ventas mayoristas (desde el almacén) ---
+  mayoristasProductos: (almacenId) =>
+    apiFetch('/mayoristas/productos' + (almacenId ? '?almacen_id=' + almacenId : '')),
+  mayoristasVender: (d) => apiFetch('/mayoristas', { method: 'POST', body: JSON.stringify(d) }),
+  mayoristasHistorial: (p) => apiFetch('/mayoristas?' + new URLSearchParams(p || {}).toString()),
+  mayoristasBorrar: (id, motivo) =>
+    apiFetch('/mayoristas/' + id, { method: 'DELETE', body: JSON.stringify({ motivo }) }),
+
   // --- Recetas ---
   recetas: () => apiFetch('/recetas'),
   recetaCrear: (d) => apiFetch('/recetas', { method: 'POST', body: JSON.stringify(d) }),

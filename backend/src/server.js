@@ -50,6 +50,7 @@ import respaldosRoutes from './routes/respaldos.js';
 import notificacionesRoutes from './routes/notificaciones.js';
 import credencialesRoutes from './routes/credenciales.js';
 import dineroRoutes from './routes/dinero.js';
+import mayoristasRoutes from './routes/mayoristas.js';
 import informesRoutes from './routes/informes.js';
 import tableroRoutes from './routes/tablero.js';
 import cuentasRoutes from './routes/cuentas.js';
@@ -177,6 +178,10 @@ app.use('/api/credenciales', requiereSesion, escrituraSoloRoles(), credencialesR
 // por moneda. Lo declara el dueño; contabilidad también escribe porque es
 // quien cuadra la caja. El almacenero y ventas no pintan nada aquí.
 app.use('/api/dinero', requiereSesion, escrituraSoloRoles('contabilidad'), dineroRoutes);
+// Ventas mayoristas: vender directo del almacén a quien compra en grande.
+// El propio router filtra por rol (dueño y contabilidad): lleva precios y
+// cobro, y al almacenero los precios se le ocultan a propósito.
+app.use('/api/mayoristas', requiereSesion, mayoristasRoutes);
 
 // ---- Middleware de errores: cualquier fallo en una ruta cae aquí ----
 // Devuelve un JSON claro con 500 en vez de tumbar el servidor.

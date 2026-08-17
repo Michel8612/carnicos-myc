@@ -620,3 +620,12 @@ h1, h2 {
 .aviso-stock .at-titulo { color: #7a5c00; }
 .lista-bajos { margin: 6px 0 10px; padding-left: 20px; font-size: 13px; color: #5d4400; }
 .lista-bajos li { margin-bottom: 3px; }
+
+/* Fila de acciones de la cabecera del almacén */
+.acciones-almacen { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+.btn-mayoristas {
+  display: inline-block; background: #5e35b1; color: #fff; text-decoration: none;
+  padding: 11px 18px; border-radius: 8px; font-size: 15px; font-weight: bold;
+  min-height: 44px; line-height: 22px; box-sizing: border-box;
+}
+.btn-mayoristas:hover { background: #4527a0; }

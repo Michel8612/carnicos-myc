@@ -54,6 +54,14 @@ const TIPO_LABEL = {
   reventa: 'Reventa',
 };
 
+// El botón de ventas mayoristas solo para quien puede poner precios.
+(function mostrarBotonMayoristas() {
+  const rol = (getUsuario() || {}).rol;
+  if (esDueno() || rol === 'contabilidad') {
+    document.getElementById('btnMayoristas')?.classList.remove('hidden');
+  }
+})();
+
 // Mostrar/ocultar formulario de nuevo producto
 btnAgregarProducto.addEventListener('click', () => {
   formProducto.classList.toggle('hidden');
