@@ -39,6 +39,12 @@ const GRUPOS_ROL = {
 
 // ¿Esta notificación le toca a ESTE usuario?
 function leTocaAlUsuario(fila, usuario) {
+  // Dirigida a una persona concreta: manda eso y nada más. Se comprueba
+  // antes que el rol porque un aviso con destinatario NO es "para
+  // todos" aunque no lleve destino_rol.
+  if (fila.destino_usuario_id != null) {
+    return Number(fila.destino_usuario_id) === Number(usuario.id);
+  }
   if (!fila.destino_rol) return true; // nulo = para todos
   if (fila.destino_rol === usuario.rol) return true;
   const grupo = GRUPOS_ROL[fila.destino_rol];
@@ -79,12 +85,18 @@ async function notificacionesPara(usuario, limite = 200) {
   const destinosValidos = [rol, ...gruposDelUsuario];
   const placeholders = destinosValidos.map(() => '?').join(',');
 
+  // Tres formas de que un aviso sea suyo: va a su nombre, no va a nadie
+  // en particular (para todos), o va a su rol. Los avisos con
+  // destinatario ajeno quedan fuera aquí mismo, en la consulta: así el
+  // vendedor de una tienda no ve lo que se le manda a otra.
   return db.prepare(`
     SELECT * FROM notificaciones
-    WHERE destino_rol IS NULL OR destino_rol IN (${placeholders})
+    WHERE destino_usuario_id = ?
+       OR (destino_usuario_id IS NULL
+           AND (destino_rol IS NULL OR destino_rol IN (${placeholders})))
     ORDER BY creada_en DESC
     LIMIT ?
-  `).all(...destinosValidos, limite);
+  `).all(usuario.id, ...destinosValidos, limite);
 }
 
 // ---------- GET / : las que le tocan al usuario, con si ya la leyó ----------
@@ -151,17 +163,24 @@ router.post('/leer-todas', async (req, res) => {
 // auditoria.js): perder una notificación es malo, pero tumbar una
 // producción o una venta por un fallo al avisar sería mucho peor. Por
 // eso atrapa su propio error y devuelve null en vez de propagarlo.
+// `destino_usuario_id` dirige el aviso a UNA persona; `destino_rol`, a
+// un rol entero; ninguno de los dos, a todo el mundo. Si se pasan los
+// dos manda la persona (ver leTocaAlUsuario).
 export async function crearNotificacion({
   tipo, titulo, mensaje = null, severidad = 'info',
-  destino_rol = null, referencia_tipo = null, referencia_id = null,
+  destino_rol = null, destino_usuario_id = null,
+  referencia_tipo = null, referencia_id = null,
 }) {
   try {
     if (!tipo || !titulo) throw new Error('Hacen falta al menos tipo y título.');
     const severidadValida = ['info', 'aviso', 'urgente'].includes(severidad) ? severidad : 'info';
     const r = await db.prepare(`
-      INSERT INTO notificaciones (tipo, titulo, mensaje, severidad, destino_rol, referencia_tipo, referencia_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(tipo, titulo, mensaje, severidadValida, destino_rol, referencia_tipo, referencia_id ?? null);
+      INSERT INTO notificaciones (tipo, titulo, mensaje, severidad, destino_rol, destino_usuario_id, referencia_tipo, referencia_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      tipo, titulo, mensaje, severidadValida, destino_rol,
+      destino_usuario_id ?? null, referencia_tipo, referencia_id ?? null,
+    );
     return r.lastInsertRowid;
   } catch (e) {
     console.error('No se pudo crear la notificación:', e.message);

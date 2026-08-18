@@ -195,10 +195,15 @@ router.get('/indicadores', async (req, res) => {
   // entra al tablero es dueño/admin/proveedor/contabilidad, y ninguno de
   // esos roles pertenece a un grupo (GRUPOS_ROL en notificaciones.js solo
   // agrupa 'almacen'), así que no hace falta repetir esa expansión aquí.
+  // Los avisos dirigidos a UNA persona (destino_usuario_id, p. ej. la
+  // mercancía que va a un vendedor concreto) no cuentan para los demás:
+  // sin esto, a quien abra el tablero le subiría el número por avisos
+  // que su campanita no le va a enseñar nunca.
   const notifs = await db.prepare(`
     SELECT leida_por FROM notificaciones
-    WHERE destino_rol IS NULL OR destino_rol = ?
-  `).all(req.usuario.rol);
+    WHERE (destino_usuario_id IS NULL OR destino_usuario_id = ?)
+      AND (destino_rol IS NULL OR destino_rol = ?)
+  `).all(req.usuario.id, req.usuario.rol);
   const avisosSinLeer = notifs.filter((f) => {
     const leidos = (f.leida_por || '').split(',').map((s) => s.trim()).filter(Boolean);
     return !leidos.includes(String(req.usuario.id));

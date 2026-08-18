@@ -249,68 +249,12 @@ movimientoForm.addEventListener('submit', (e) => {
     });
 });
 
-// ============================================================
-//  Bandeja de recepción: transferencias pendientes dirigidas a
-//  este usuario (su almacén, o él mismo como vendedor).
-// ============================================================
-function fechaCorta(f) {
-  if (!f) return '';
-  const d = new Date(f);
-  return d.toLocaleDateString('es-CU', { day: '2-digit', month: '2-digit' }) + ' ' +
-    d.toLocaleTimeString('es-CU', { hour: '2-digit', minute: '2-digit' });
-}
-
-async function cargarBandejaRecepcion() {
-  const aviso = document.getElementById('avisoPendientes');
-  const bloque = document.getElementById('bandejaRecepcion');
-  const lista = document.getElementById('bandejaLista');
-  if (!bloque || !lista) return;
-
-  let pendientes = [];
-  try { pendientes = await API.transferenciasPendientes(); } catch (e) { pendientes = []; }
-
-  if (!pendientes.length) {
-    bloque.classList.add('hidden');
-    if (aviso) aviso.classList.add('hidden');
-    return;
-  }
-
-  if (aviso) {
-    aviso.classList.remove('hidden');
-    aviso.textContent = pendientes.length === 1
-      ? 'Tiene 1 entrada por recibir'
-      : `Tiene ${pendientes.length} entradas por recibir`;
-  }
-
-  bloque.classList.remove('hidden');
-  lista.innerHTML = pendientes.map((t) => `
-    <div class="tarjeta-pendiente">
-      <div class="tarjeta-pendiente-info">
-        <b>${t.producto_nombre || 'Producto'}</b>
-        — ${Number(t.cantidad).toLocaleString('es-CU', { maximumFractionDigits: 3 })}
-        <br>
-        <span class="tarjeta-pendiente-detalle">
-          Envía: ${t.enviado_nombre || 'alguien'} · Desde: ${t.origen_almacen_nombre || '—'} · ${fechaCorta(t.fecha_envio)}
-        </span>
-      </div>
-      <div class="tarjeta-pendiente-botones">
-        <button class="btn-aceptar" onclick="resolverTransferencia(${t.id}, 'aceptar')">Aceptar entrada</button>
-        <button class="btn-cancelar" onclick="resolverTransferencia(${t.id}, 'cancelar')">Cancelar recepción</button>
-      </div>
-    </div>
-  `).join('');
-}
-
-async function resolverTransferencia(id, accion) {
-  if (accion === 'cancelar' && !confirm('¿Cancelar esta recepción? La mercancía volverá al almacén de origen.')) return;
-  try {
-    if (accion === 'aceptar') await API.aceptarTransferencia(id);
-    else await API.cancelarTransferencia(id);
-    await cargarTodo();
-  } catch (e) {
-    alert('No se pudo resolver la transferencia: ' + e.message);
-  }
-}
+// La bandeja de recepción (lo que llega en camino y hay que aceptar)
+// se mudó a js/recepcion.js, porque el vendedor necesita exactamente la
+// misma y tenerla aquí dentro era la razón de que él no la tuviera.
+// De ahí salen `cargarBandejaRecepcion`, `resolverTransferencia` y
+// `fechaCorta`, que se sigue usando más abajo en el historial.
+// almacen.html carga ese script ANTES que este.
 
 // ============================================================
 //  Historial de transferencias (estado: pendiente/aceptada/cancelada)
@@ -687,7 +631,7 @@ function cargarTodo() {
   cargarProductosSelect();
   cargarAlmacenes();
   cargarProducido();   // lo que la cocina dejó listo para entrar
-  cargarBandejaRecepcion();       // transferencias pendientes por recibir
+  cargarBandejaRecepcion(cargarTodo);  // transferencias pendientes por recibir
   cargarHistorialTransferencias(); // historial de lo enviado
   cargarHistorialMovimientos();   // historial de entradas/salidas/ajustes
   cargarProductosOcultos();

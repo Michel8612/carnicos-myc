@@ -57,9 +57,19 @@
   const DESTINO = {
     produccion_recibida: 'almacen.html',
     stock_bajo: 'almacen.html',
-    transferencia_pendiente: 'almacen.html',
     cuenta_vencida: 'cuentas.html',
   };
+
+  // "Tiene mercancía por recibir" no lleva siempre al mismo sitio: el
+  // almacenero la recibe en Almacén y el vendedor en Ventas. Mandarlos
+  // a todos a almacen.html dejaba al vendedor dando vueltas —el guard
+  // de esa página lo devolvía a ventas.html— con el aviso ya marcado
+  // como leído y la mercancía sin recibir.
+  function destinoDe(tipo) {
+    if (tipo !== 'transferencia_pendiente') return DESTINO[tipo];
+    const rol = (getUsuario() || {}).rol;
+    return rol === 'ventas' ? 'ventas.html' : 'almacen.html';
+  }
 
   async function refrescar() {
     try {
@@ -126,7 +136,7 @@
       // tenía que ir: el aviso volverá a aparecer, que es lo correcto.
     }
 
-    const destino = DESTINO[item.dataset.tipo];
+    const destino = destinoDe(item.dataset.tipo);
     if (destino) location.href = destino;
     else {
       item.classList.remove('nuevo');
@@ -138,6 +148,11 @@
   document.addEventListener('click', (ev) => {
     if (!caja.contains(ev.target)) cerrar();
   });
+
+  // Para que otras pantallas bajen el número en el momento de resolver
+  // lo que el aviso avisaba (ver js/recepcion.js), en vez de dejar al
+  // usuario mirando un aviso que ya atendió hasta el próximo refresco.
+  window.refrescarAvisos = refrescar;
 
   refrescar();
   // Cada dos minutos: lo justo para enterarse de una entrada de

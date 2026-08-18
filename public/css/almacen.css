@@ -148,93 +148,11 @@ h1, h2 {
   }
 }
 
-/* ============================================================
-   Clase utilitaria .hidden — se usaba en el HTML/JS de este módulo
-   (y de otros) para mostrar/ocultar bloques, pero no estaba definida
-   en ningún CSS: los bloques "ocultos" en realidad se veían siempre.
-   Se define aquí, con !important para ganarle a cualquier display
-   puesto en línea o en una regla más específica.
-   ============================================================ */
-.hidden {
-  display: none !important;
-}
-
-/* ============================================================
-   Aviso de entradas por recibir (transferencias pendientes)
-   ============================================================ */
-.aviso-pendientes {
-  margin: 16px 0;
-  padding: 12px 16px;
-  background: #fff3e0;
-  border: 1px solid #ffb74d;
-  border-left: 5px solid #e65100;
-  border-radius: 8px;
-  color: #e65100;
-  font-weight: bold;
-  font-size: 15px;
-}
-
-/* ============================================================
-   Bandeja de recepción — transferencias pendientes dirigidas a
-   este usuario (su almacén o él como vendedor)
-   ============================================================ */
-#bandejaRecepcion {
-  margin-top: 20px;
-  padding: 20px;
-  background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 3px 10px rgba(0,0,0,.12);
-  border-top: 4px solid #e65100;
-}
-
-.tarjeta-pendiente {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px;
-  margin: 10px 0;
-  background: #fafafa;
-  border: 1px solid #eee;
-  border-radius: 10px;
-}
-
-.tarjeta-pendiente-info {
-  flex: 1 1 220px;
-  font-size: 14px;
-  line-height: 1.5;
-}
-
-.tarjeta-pendiente-detalle {
-  color: #666;
-  font-size: 12px;
-}
-
-.tarjeta-pendiente-botones {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.tarjeta-pendiente-botones button {
-  border: none;
-  border-radius: 8px;
-  padding: 10px 16px;
-  font-size: 14px;
-  font-weight: bold;
-  color: #fff;
-  cursor: pointer;
-  transition: filter 0.15s ease, transform 0.15s ease;
-}
-
-.tarjeta-pendiente-botones button:hover {
-  filter: brightness(1.08);
-  transform: translateY(-1px);
-}
-
-.btn-aceptar { background: #2e7d32; }
-.btn-cancelar { background: #c62828; }
+/* La clase .hidden y todos los estilos de la bandeja de recepción
+   (.aviso-pendientes, #bandejaRecepcion, .tarjeta-pendiente…) se
+   mudaron a css/recepcion.css, que cargan tanto Almacén como Ventas.
+   El vendedor necesita esa misma bandeja, y tenerla aquí dentro la
+   dejaba fuera de su pantalla. */
 
 /* ============================================================
    Rediseño visual de "Registrar Entrada / Salida"
@@ -459,15 +377,6 @@ h1, h2 {
 @media (max-width: 600px) {
   #movimientoForm {
     padding: 16px;
-  }
-
-  .tarjeta-pendiente {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .tarjeta-pendiente-botones button {
-    flex: 1;
   }
 
   #historialTransferencias th, #historialTransferencias td {

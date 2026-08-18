@@ -71,6 +71,12 @@ if (esDueno()) {
 }
 
 async function cargar() {
+  // La mercancía que le mandaron y todavía no ha aceptado. Va aquí
+  // arriba y sin await porque no depende de la hoja del día: si la hoja
+  // fallara, el vendedor tiene que poder recibir igual (y `cargar` se
+  // sale antes de tiempo en varios sitios, así que abajo no correría).
+  cargarBandejaRecepcion(cargar);
+
   let d;
   try { d = await API.ventasHoja(verUsuarioId); }
   catch (e) { vacioHoja.style.display = 'block'; vacioHoja.textContent = 'No se pudo cargar: ' + e.message; return; }
@@ -345,6 +351,14 @@ function cambiarVista(panelId) {
 tabsVentas.querySelectorAll('button').forEach((b) => {
   b.addEventListener('click', () => cambiarVista(b.dataset.panel));
 });
+
+// El aviso naranja de "tiene entradas por recibir" vive fuera de las
+// pestañas para que se vea desde cualquiera. Pulsarlo lleva a la
+// bandeja: si no, el vendedor lee el aviso y no sabe adónde ir.
+const avisoRecepcion = document.getElementById('avisoPendientes');
+if (avisoRecepcion) {
+  avisoRecepcion.addEventListener('click', () => cambiarVista('pRecepcion'));
+}
 
 // ============================================================
 //  Catálogo (tarjetas para vender rápido)

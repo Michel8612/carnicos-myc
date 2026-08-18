@@ -6,6 +6,7 @@
   <title>Ventas - Cárnicos M&C</title>
   <link rel="stylesheet" href="css/style.css">
   <link rel="stylesheet" href="css/ventas.css">
+  <link rel="stylesheet" href="css/recepcion.css">
   <style>
     .barra-info { display:flex; flex-wrap:wrap; gap:10px 18px; align-items:center; justify-content:center; margin:14px 0; font-size:15px; color:#333; }
     .barra-info b { color:#1976D2; }
@@ -77,9 +78,17 @@
       </span>
     </div>
 
+    <!-- El aviso de mercancía en camino va FUERA de las pestañas, a
+         propósito: el vendedor pasa el día en "Hoja del día" y si el
+         aviso viviera dentro de su pestaña no lo vería nunca. Se
+         esconde solo cuando no hay nada que recibir. Al pulsarlo lleva
+         a la bandeja. -->
+    <div id="avisoPendientes" class="aviso-pendientes hidden" style="cursor:pointer;"></div>
+
     <div class="tabs-ventas" id="tabsVentas">
       <button class="tv-activo" data-panel="pHoja">Hoja del día</button>
       <button data-panel="pCatalogo">Catálogo</button>
+      <button data-panel="pRecepcion">Recibir mercancía</button>
       <button data-panel="pHistorial">Historial</button>
     </div>
 
@@ -171,6 +180,21 @@
     </section>
 
     <!-- ===================== VISTA: HISTORIAL ===================== -->
+    <!-- ===================== VISTA: RECIBIR MERCANCÍA =====================
+         La misma bandeja que usa el almacenero (js/recepcion.js). Lo que
+         el almacén le envía no se le suma solo: queda aquí hasta que él
+         lo acepta, y solo entonces entra en su hoja. Si el paquete no
+         llegó, sus cuentas no dicen que sí. -->
+    <section class="panel-vista" id="pRecepcion">
+      <div id="bandejaRecepcion" class="hidden">
+        <h2>Mercancía en camino</h2>
+        <div id="bandejaLista"></div>
+      </div>
+      <div id="recepcionVacio" class="vacio-vta">
+        No hay mercancía esperando. Cuando el almacén le envíe algo, aparecerá aquí.
+      </div>
+    </section>
+
     <section class="panel-vista" id="pHistorial">
       <!-- Cierres anteriores: un renglón por cada "Cierre diario" hecho
            (ver POST /ventas/reiniciar y GET /ventas/cierres). Es el
@@ -324,6 +348,7 @@
   <script src="js/sonidos.js"></script>
   <script src="js/avisos.js"></script>
   <script src="js/tasas.js"></script>
+  <script src="js/recepcion.js"></script>
   <script src="js/ventas.js"></script>
 </body>
 </html>

@@ -873,12 +873,24 @@ CREATE TABLE IF NOT EXISTS notificaciones (
   mensaje TEXT,
   severidad TEXT NOT NULL DEFAULT 'info',   -- info | aviso | urgente
   destino_rol TEXT,                         -- null = todos
+  destino_usuario_id INTEGER,               -- para UNA persona (ver abajo)
   referencia_tipo TEXT,
   referencia_id INTEGER,
   leida_por TEXT NOT NULL DEFAULT '',       -- ids de usuario separados por coma
   creada_en TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_notif_fecha ON notificaciones(creada_en DESC);
+
+-- Un aviso podía dirigirse a un ROL, pero no a una PERSONA. Con varios
+-- puntos de venta eso no alcanza: si al almacenero le mandan mercancía
+-- a la tienda de Ana y el aviso se dirige al rol "ventas", lo leen
+-- todos los vendedores — y ven qué producto y cuánto se le manda a otra
+-- tienda. Con esta columna el aviso va al destinatario y a nadie más.
+-- Va SIN REFERENCES a propósito: restaurar un respaldo inserta por
+-- tablas y una clave ajena aquí obligaría a ordenarlas (ver el lío de
+-- almacenes <-> usuarios en respaldos.js). Un aviso huérfano no rompe
+-- nada; un respaldo que no se puede restaurar, sí.
+ALTER TABLE notificaciones ADD COLUMN IF NOT EXISTS destino_usuario_id INTEGER;
 
 -- ---- Historial de cálculos de tributación ------------------
 -- Cada vez que se calcula el tributo de un periodo se guarda aquí lo

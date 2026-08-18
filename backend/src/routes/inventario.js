@@ -12,6 +12,7 @@ import { requiereSesion } from '../middleware/auth.js';
 import { anotar } from '../libro.js';
 import { auditar } from '../auditoria.js';
 import { resolverCosto } from '../servicios/monedas.js';
+import { crearNotificacion, marcarLeidaPorReferencia } from './notificaciones.js';
 
 const router = Router();
 router.use(requiereSesion);
@@ -660,6 +661,42 @@ router.post('/movimientos', async (req, res) => {
       });
     }
 
+    // ------------------------------------------------------------
+    //  Avisar a quien tiene que recibir la mercancía
+    //
+    //  La mercancía enviada NO entra sola en el destino: se queda
+    //  "pendiente" hasta que el destinatario la acepta. Si nadie le
+    //  avisa, se queda ahí para siempre — que es justo lo que pasaba
+    //  con los vendedores: les mandaban producto, ellos no se
+    //  enteraban, no lo aceptaban, y nunca les llegaba.
+    //
+    //  A un vendedor se le avisa POR SU NOMBRE (destino_usuario_id) y
+    //  no por su rol: con varios puntos de venta, avisar al rol
+    //  'ventas' significaría enseñarle a cada vendedor qué y cuánto se
+    //  le manda a los demás. A un almacén se le avisa por rol, porque
+    //  ahí el destinatario es el almacén, no una persona.
+    //
+    //  El dueño lo ve igual: en el centro de avisos no se le filtra
+    //  nada (ver ES_JEFE en notificaciones.js).
+    //
+    //  Va fuera de la transacción y crearNotificacion se traga sus
+    //  propios errores: un fallo al avisar no puede tumbar un envío ya
+    //  guardado.
+    if (transferenciaId && destinoTipo) {
+      const queEs = `${info?.nombre || 'Mercancía'} — ${cant} ${info?.unidad || ''}`.trim();
+      await crearNotificacion({
+        tipo: 'transferencia_pendiente',
+        titulo: 'Tiene mercancía por recibir',
+        mensaje: `${queEs}. Enviado desde ${info?.almacen || 'el almacén'}. `
+               + 'Hay que aceptarlo para que entre en su inventario.',
+        severidad: 'aviso',
+        destino_rol: destinoTipo === 'almacen' ? 'almacen' : null,
+        destino_usuario_id: destinoTipo === 'ventas' ? destinoId : null,
+        referencia_tipo: 'transferencia',
+        referencia_id: transferenciaId,
+      });
+    }
+
     // Se devuelve el costo tal como quedó archivado (los dos importes y la
     // tasa) para que la pantalla pueda confirmarle al usuario a qué cambio
     // se guardó, y el aviso si no se pudo convertir por falta de tasa.
@@ -1144,6 +1181,14 @@ router.post('/transferencias/:id/aceptar', async (req, res) => {
       usuario: req.usuario,
       nota: `De ${t.origen_almacen_nombre || 'almacén'} a ${t.destino_nombre || (t.destino_tipo === 'almacen' ? 'almacén' : 'vendedor')} (transferencia aceptada)`,
     });
+
+    // El aviso ya no tiene nada que avisar: se cierra para quien acaba
+    // de resolverlo. Se cierra solo para él, no para los demás
+    // destinatarios (así funciona `leida_por`).
+    await marcarLeidaPorReferencia({
+      referencia_tipo: 'transferencia', referencia_id: id, usuario_id: req.usuario.id,
+    });
+
     res.json({ ok: true });
   } catch (err) {
     res.status(err.status || 400).json({ error: err.message });
@@ -1196,6 +1241,12 @@ router.post('/transferencias/:id/cancelar', async (req, res) => {
       usuario: req.usuario,
       nota: `Devuelto a ${t.origen_almacen_nombre || 'almacén de origen'} (transferencia cancelada)`,
     });
+
+    // Igual que al aceptar: el aviso deja de tener sentido.
+    await marcarLeidaPorReferencia({
+      referencia_tipo: 'transferencia', referencia_id: id, usuario_id: req.usuario.id,
+    });
+
     res.json({ ok: true });
   } catch (err) {
     res.status(err.status || 400).json({ error: err.message });
