@@ -7,15 +7,13 @@
    pantallas carguen lo mismo.
    ============================================================ */
 
-/* Se usa en el HTML/JS de varios módulos para mostrar y ocultar
-   bloques. Lleva !important a propósito, para ganarle a cualquier
-   display puesto en línea o en una regla más específica.
+/* La clase .hidden se mudó a css/style.css, que lo carga TODA página
+   del sistema. Aquí solo la cargaban Almacén y Ventas, así que las
+   pantallas que no traen este archivo (Cálculos y Usuarios) enseñaban
+   siempre lo que debía estar oculto.
    OJO: esta bandeja se apoya en .hidden para esconderse cuando no hay
-   nada que recibir. Si esta regla falta en una página, la bandeja se
-   queda visible y vacía. */
-.hidden {
-  display: none !important;
-}
+   nada que recibir; si una página deja de cargar style.css, la bandeja
+   se le queda visible y vacía. */
 
 /* Aviso de entradas por recibir (transferencias pendientes) */
 .aviso-pendientes {

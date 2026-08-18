@@ -1,3 +1,20 @@
+/* ============================================================
+   .hidden — mostrar y ocultar bloques desde el HTML y el JS.
+
+   Vive AQUÍ y no en el CSS de cada área porque style.css lo carga
+   TODA página del sistema. Estuvo en css/almacen.css y luego en
+   css/recepcion.css, y las pantallas que no cargaban ese archivo
+   (Cálculos y Usuarios) enseñaban siempre lo que debía estar
+   oculto: en Cálculos, la tabla de resultados vacía con el botón
+   "Registrar producción" activo antes de haber calculado nada.
+
+   Lleva !important a propósito, para ganarle a cualquier display
+   puesto en línea o en una regla más específica.
+   ============================================================ */
+.hidden {
+  display: none !important;
+}
+
 /* Estilos generales */
 body {
   margin: 0;

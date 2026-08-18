@@ -261,6 +261,11 @@ function alternarHistorial(e) {
     cargarHistorial();
   } else {
     panelHistorial.classList.add('hidden');
+    // Al cerrar el historial se devuelve el cálculo que había en pantalla.
+    // Sin esto no queda nada a la vista y parece que el cálculo se perdió,
+    // obligando a pulsar "Calcular" otra vez. (No se notaba mientras .hidden
+    // no existía en esta página y los dos bloques se veían siempre.)
+    if (ULTIMO_CALCULO) cajaResultado.classList.remove('hidden');
   }
 }
 
